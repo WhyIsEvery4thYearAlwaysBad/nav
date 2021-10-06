@@ -1,0 +1,18 @@
+nav is an executable that helps modify source nav mesh files. It only accepts one file, for sake of easier programming. There is no real drawback anyway.
+Commands (I need to work on):
+
+* nav file <file path> 
+	
+* nav compress ids - Compresses IDs.
+
+FIXED issues:
+1. ~~Something is going on here that's screwing up the file stream.~~ God I'm a fucking idiot… (actually get TFAttributes)
+
+
+Todo:
+
+* Use all non-GNU launch options and import them into cmd directly.
+* Add helper functions for NavArea and NavCustomData to output their raw data.
+* Use filebuffer in std::fstream instead of just using fstream.
+* Use file-based messages.
+* Get commands from file instead of making them internal.
