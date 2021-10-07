@@ -17,26 +17,6 @@ class NavHideSpot;
 class NavEncounterSpot;
 class NavEncounterPath;
 
-// Game-specific data.
-class NavCustomData {
-public:
-	EngineVersion type;
-
-	virtual void ReadData(std::streambuf& buffer);
-	virtual void WriteData(std::streambuf& out);
-};
-
-// TF2 data.
-class TF2NavCustomData : public NavCustomData {
-public:
-	unsigned int TFAttributes;
-	TF2NavCustomData();
-	TF2NavCustomData(NavCustomData& data);
-
-	void ReadData(std::streambuf& buffer);
-	void WriteData(std::streambuf& out);
-};
-
 class NavArea {
 	public:
 
@@ -57,15 +37,17 @@ class NavArea {
 		std::make_pair(0, std::vector<NavConnection>()), 
 		std::make_pair(0, std::vector<NavConnection>())}; 
 	unsigned short PlaceID = 0; // The ID of the place this area is in.
-	std::pair<unsigned char, std::vector<NavHideSpot> > hideSpotData; /* [1] - Amount of hide spots. 
+	/*	[1] - Amount of hide spots. 
 		[2] - Container
 	*/
-	unsigned char approachSpotCount = 0u; // Approach spot count (removed in MVer 15)
+	std::pair<unsigned char, std::vector<NavHideSpot> > hideSpotData; 
+	// Approach spot count (removed in MVer 15)
+	unsigned char approachSpotCount = 0u; 
 	std::optional<std::vector<NavApproachSpot> > approachSpotData; // Approach spot container (removed in MVer 15)
 	std::pair<IntID, std::list<IntID> > ladderData[2]; // Container for ladder data.
 	unsigned int encounterPathCount = 0u; // Amount of encounter paths.
 	std::optional<std::deque<NavEncounterPath> > encounterPaths;
-	std::array<float, 2> EarliestOccupationTimes; // The earliest time teams can occupy this area
+	std::array<float, 2> EarliestOccupationTimes = {0.0f, 0.0f}; // The earliest time teams can occupy this area
 
 	std::optional<unsigned int> visAreaCount; // <----- Introduced in major version 16.
 	std::optional<std::vector<NavVisibleArea> > visAreas; // Amount of vis areas.
@@ -85,7 +67,7 @@ class NavArea {
 	// Fills data from stream.
 	bool ReadData(std::streambuf& buf, const unsigned int& MajorVersion, const std::optional<unsigned int>& MinorVersion);
 
-	bool hasSameFileData(const NavArea& rhs);
+	std::optional<bool> hasSameNAVData(const NavArea& rhs, const unsigned int& MajorVersion, const std::optional<unsigned int>& MinorVersion);
 };
 #define LADDER_SIZE 69 // Total size of ladder data.
 #endif

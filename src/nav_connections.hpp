@@ -14,5 +14,7 @@ class NavConnection {
 
 	bool ReadData(std::streambuf& buf);
 	bool WriteData(std::streambuf& out);
+
+	bool operator==(const NavConnection& rhs) const;
 };
 #endif

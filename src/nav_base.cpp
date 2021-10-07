@@ -85,6 +85,11 @@ bool NavVisibleArea::ReadData(std::streambuf& in) {
 	return true;
 }
 
+bool NavVisibleArea::hasSameNAVData(const NavVisibleArea& rhs) const {
+	return VisibleAreaID == rhs.VisibleAreaID
+	&& Attributes == rhs.Attributes;
+}
+
 bool NavHideSpot::WriteData(std::streambuf& out) {
 	if (out.sputn(reinterpret_cast<char*>(&ID), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
 		#ifdef NDEBUG
@@ -134,6 +139,12 @@ void NavHideSpot::OutputData(std::ostream& out) {
 	out << "#" << ID << ":\n"
 	<< "\tPosition: " << position[0] << ", " <<position[1] << ", " << position[2] << '\n'
 	<< "\tAttributes: " << std::hex << (int)Attributes;
+}
+
+bool NavHideSpot::hasSameNAVData(const NavHideSpot& rhs) const {
+	return ID == rhs.ID
+	&& position == rhs.position
+	&& Attributes == rhs.Attributes;
 }
 
 // Fill data from stream buffer.
@@ -207,6 +218,17 @@ bool NavApproachSpot::WriteData(std::streambuf& out) {
 		return false;
 	}
 	return true;
+}
+
+std::optional<bool> NavApproachSpot::hasSameNAVData(NavApproachSpot& rhs) {
+	std::stringstream leftStr, rightStr;
+	if (!WriteData(*leftStr.rdbuf())) {
+		return {};
+	}
+	if (!rhs.WriteData(*rightStr.rdbuf())) {
+		return {};
+	}
+	return leftStr.str() == rightStr.str();
 }
 
 // Read data of the structure.
@@ -292,6 +314,17 @@ bool NavEncounterPath::WriteData(std::streambuf& out) {
 		}
 	}
 	return true;
+}
+
+std::optional<bool> NavEncounterPath::hasSameNAVData(NavEncounterPath& rhs) {
+	std::stringstream leftStr, rightStr;
+	if (!WriteData(*leftStr.rdbuf())) {
+		return {};
+	}
+	if (!rhs.WriteData(*rightStr.rdbuf())) {
+		return {};
+	}
+	return leftStr.str() == rightStr.str();
 }
 
 // Output data.

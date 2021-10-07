@@ -21,3 +21,7 @@ bool NavConnection::WriteData(std::streambuf& out) {
 	}
 	return true;
 }
+
+bool NavConnection::operator==(const NavConnection& rhs) const {
+	return TargetAreaID == rhs.TargetAreaID;
+}

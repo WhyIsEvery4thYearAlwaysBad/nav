@@ -102,7 +102,7 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 	{
 		if (buf.sgetn(reinterpret_cast<char*>(seCorner.data() + i), VALVE_FLOAT_SIZE) != VALVE_FLOAT_SIZE) {
 			std::cerr << "NavArea::ReadData(): FATAL: Could not read nwCorner["<<i<<"]!\n";
-				return false;
+			return false;
 		}
 	}
 	// Read NorthEastZ…
@@ -125,7 +125,9 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 	for (unsigned char currDirection = (char)Direction::North; currDirection < (char)Direction::Count; currDirection++)
 	{
 		if (buf.sgetn(reinterpret_cast<char*>(&connectionData[currDirection].first), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
+			#ifdef NDEBUG
 			std::cerr << "NavArea::ReadData(): Could not get direction " << (int)currDirection <<" connection data count!\n";
+			#endif
 			return false;
 		}
 		for (size_t i = 0; i < connectionData[currDirection].first; i++)
@@ -133,7 +135,7 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 			connectionData[currDirection].second.emplace_back();
 			if (!connectionData[currDirection].second.back().ReadData(buf)) {
 				#ifdef NDEBUG
-				std::cerr << "NavArea::ReadData(): Failed to read connection data!\n";
+				std::cerr << "NavArea::ReadData(): Failed to read connection data for direction "<<std::to_string(currDirection)<<"!\n";
 				#endif
 				return false;
 			}
@@ -228,7 +230,9 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 		for (size_t i = 0; i < (char)Direction::Count; i++)
 		{
 			if (buf.sgetn(reinterpret_cast<char*>(LightIntensity.value().data() + i), VALVE_FLOAT_SIZE) != VALVE_FLOAT_SIZE) {
+				#ifdef NDEBUG
 				std::cerr << "NavArea::ReadData(): Could not read light intensity for corner["<<i<<"]!\n";
+				#endif
 				return false;
 			}
 		}
@@ -248,7 +252,9 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 		for (size_t i = 0; i < visAreaCount; i++)
 		{
 			if (!visAreas.value().at(i).ReadData(buf)) {
+				#ifdef NDEBUG
 				std::cerr << "NavArea::ReadData(): Could not read visArea data!\n";
+				#endif
 				return false;
 			}
 		}
@@ -260,11 +266,13 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 	}
 	// Create custom game data IF the custom data is there.
 	if (buf.in_avail() > 0) {
+		std::streampos customDataPos = buf.pubseekoff(0, std::ios_base::cur, std::ios_base::in);
 		customDataSize = getCustomDataSize(buf, GetAsEngineVersion(MajorVersion, {}));
-		buf.pubseekoff(-customDataSize, std::ios_base::cur);
-		// Reset data.
+		buf.pubseekpos(customDataPos, std::ios_base::in);
+		// Make room for custom data.
 		customData.clear();
-		customData.reserve(customDataSize);
+		customData.resize(customDataSize);
+		// Read custom data.
 		if (buf.sgetn(reinterpret_cast<char*>(customData.data()), customDataSize) != customDataSize) {
 			#ifdef NDEBUG
 			std::cerr << "NavArea::ReadData(): Could not read custom data!\n";
@@ -530,27 +538,13 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	return true;
 }
 
-void NavCustomData::ReadData(std::streambuf& out) {
-
-}
-
-void NavCustomData::WriteData(std::streambuf& out) {
-
-}
-
-
-TF2NavCustomData::TF2NavCustomData() {
-
-}
-
-TF2NavCustomData::TF2NavCustomData(NavCustomData& data) {
-	type = data.type;
-}
-
-void TF2NavCustomData::ReadData(std::streambuf& buf) {
-	buf.sgetn(reinterpret_cast<char*>(&TFAttributes), VALVE_INT_SIZE);
-}
-
-void TF2NavCustomData::WriteData(std::streambuf& out) {
-	out.sputn(reinterpret_cast<char*>(&TFAttributes), VALVE_INT_SIZE);
+std::optional<bool> NavArea::hasSameNAVData(const NavArea& rhs, const unsigned int& MajorVersion, const std::optional<unsigned int>& MinorVersion) {
+	std::stringstream leftVal, rightVal;
+	if (!WriteData(*leftVal.rdbuf(), MajorVersion, MinorVersion)) {
+		return {};
+	}
+	if (!WriteData(*rightVal.rdbuf(), MajorVersion, MinorVersion)) {
+		return {};
+	}
+	return leftVal.rdbuf()->str() == rightVal.rdbuf()->str();
 }

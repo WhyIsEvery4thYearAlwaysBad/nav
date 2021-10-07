@@ -18,4 +18,8 @@ std::pair<bool, std::string > TestEncounterSpotIO();
 // Tests the I/O of area data.
 // True on success, false on failure.
 std::pair<bool, std::string > TestNavAreaDataIO();
+
+// Tests the I/O of NAV files.
+// True on success, false on failure.
+std::pair<bool, std::string > TestNAVFileIO();
 #endif

@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <regex>
 #include <iterator>
+#include <span>
 #include "utils.hpp"
 #include "nav_tool.hpp"
 #include "test_automation.hpp"
@@ -233,10 +234,15 @@ std::optional<ToolCmd> NavTool::ParseCommandLine(int& argc, char* argv[]) {
 
 // Actually executed the command.
 bool NavTool::DispatchCommand(ToolCmd& cmd) {
-	inFile = cmd.file.value();
+	if (cmd.file.has_value()) inFile = cmd.file.value();
 	if (cmd.cmdType != ActionType::TEST) {
-		// Try to fill in meta data.
-		if (!inFile.FillMetaDataFromFile()) {
+		std::filebuf inBuf;
+		if (!inBuf.open(inFile.GetFilePath(), std::ios_base::in)) {
+			std::cerr << "fatal: Failed to open file buffer.\n";
+			return false;
+		}
+		// Try to fill in file data.
+		if (!inFile.ReadData(inBuf)) {
 			std::cerr << "Failed to parse file header.\n";
 			return false;
 		}
@@ -259,7 +265,7 @@ bool NavTool::DispatchCommand(ToolCmd& cmd) {
 	// Test
 	case ActionType::TEST:
 		{
-			std::deque<std::function<std::pair<bool, std::string>() > > funcs = {TestNavConnectionDataIO, TestEncounterSpotIO, TestEncounterPathIO, TestNavAreaDataIO};
+			std::deque<std::function<std::pair<bool, std::string>() > > funcs = {TestNavConnectionDataIO, TestEncounterSpotIO, TestEncounterPathIO, TestNavAreaDataIO, TestNAVFileIO};
 			for (size_t i = 0; i < funcs.size(); i++)
 			{
 				std::cout << funcs.at(i)().second << '\n';
@@ -280,20 +286,217 @@ bool NavTool::DispatchCommand(ToolCmd& cmd) {
 // Executes the create action.
 // Returns true if successful, false on failure.
 bool NavTool::ActionCreate(ToolCmd& cmd) {
-	NavFile& ref = inFile;
+	std::filesystem::file_status inFileStatus = std::filesystem::status(inFile.GetFilePath());
+	// Read only, can't edit.
+	if (!(bool)(inFileStatus.permissions() & std::filesystem::perms::owner_write)) {
+		std::cerr << "Input file is read only.\n";
+		return false;
+	}
+	// Generate temporary file path.
+	std::filesystem::path TempPath = std::filesystem::temp_directory_path();
+	{
+		std::mt19937 mt_gen;
+		std::string tempFileName = std::to_string(mt_gen());
+		TempPath.append("nav/");
+		// Create directories
+		if (!std::filesystem::exists(TempPath)) std::filesystem::create_directories(TempPath);
+		TempPath.append(tempFileName);
+	}
+	// Setup temp file buffer.
+	std::filebuf tmpfile;
+	if (!tmpfile.open(TempPath, std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary)) {
+		std::cerr << "Could not create temporary file.\n";
+		return false;
+	}
+	// 
+	std::filebuf inBuf;
+	if (!inBuf.open(inFile.GetFilePath(), std::ios_base::in | std::ios_base::out | std::ios_base::binary)) {
+		std::cerr << "fatal: Failed to open buffer.\n";
+		std::filesystem::remove(TempPath);
+		return false;
+	}
 	switch (cmd.target)
 	{
 	case TargetType::FILE:
+		// TODO:
+		return true;
 		break;
 	
-	case TargetType::AREA:
-		{
-			
-		}
+	case TargetType::LADDER:
+		// TODO:
+		return true;
 		break;
+	case TargetType::INVALID:
+		return false;
 	default:
 		break;
 	}
+
+	NavArea area;
+	std::optional<std::streampos> areaLoc;
+	// Find the area, unless if we're creating an area.
+	if (cmd.target != TargetType::AREA) {
+		inBuf.pubseekpos(inFile.GetAreaDataLoc());
+		// Processing areas.
+		if (!cmd.areaLocParam.has_value()) {
+			std::cerr << "fatal: area index not defined.\n";
+			std::filesystem::remove(TempPath);
+			return false;
+		}
+		// It's an ID.
+		if (cmd.areaLocParam.value().first == true) 
+			areaLoc = inFile.FindArea(cmd.areaLocParam.value().second);
+		// It's an index
+		else
+		{
+			// Out of bounds.
+			if (std::clamp(cmd.areaLocParam.value().second, 0u, inFile.GetAreaCount()) != cmd.areaLocParam.value().second) {
+				std::cerr << "Specified area index is out of range.\n";
+				std::filesystem::remove(TempPath);
+				return false;
+			}
+			areaLoc = inFile.GetAreaDataLoc();
+			for (size_t i = 0; i < cmd.areaLocParam.value().second; i++)
+			{
+				auto areaSize = inFile.TraverseNavAreaData(areaLoc.value());
+				if (areaSize.has_value()) areaLoc.value() += areaSize.value();
+				else {
+					std::cerr << "fatal: Could not get area size!\n";
+					std::filesystem::remove(TempPath);
+					return false;
+				}
+			}
+		}
+		
+		if (!areaLoc.has_value()) {
+			std::cerr << "fatal: Failed to get area position!\n";
+			return false;
+		}
+		// Got the area location. Now get data.
+		inBuf.pubseekpos(areaLoc.value(), std::ios_base::in | std::ios_base::out);
+		if (!area.ReadData(inBuf, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
+			std::cerr << "fatal: Could not get area data.\n";
+			std::filesystem::remove(TempPath);
+			return false;
+		}
+	}
+	// Now we edit the target data.
+	switch (cmd.target) {
+		case TargetType::AREA:
+			/*
+				BLank 
+			*/
+			// Set new area ID.
+			if (cmd.areaLocParam.value().first == true) area.ID = cmd.areaLocParam.value().second;
+			else area.ID = inFile.GetAreaCount();
+			// Set blank coords.
+			area.nwCorner = {0.0f, 0.0f, 0.0f};
+			area.seCorner = {0.0f, 0.0f, 0.0f};
+			// Fill custom data.
+			area.customDataSize = getCustomDataSize(inBuf, GetAsEngineVersion(inFile.GetMajorVersion(), inFile.GetMinorVersion()));
+			area.customData.resize(area.customDataSize, 0);
+			// Get the properties from the arguments and set the area properties to those values.
+			for (size_t i = 0; i < cmd.actionParams.size(); i++)
+			{
+				if (cmd.actionParams.at(i) == "id") area.ID = std::stoul(cmd.actionParams.at(++i), nullptr, 0u);
+				else if (cmd.actionParams.at(i) == "attributes") area.Flags = std::stoul(cmd.actionParams.at(++i), nullptr, 0u);
+				else if (cmd.actionParams.at(i) == "nwCorner") {
+					std::transform(cmd.actionParams.begin() + ++i, cmd.actionParams.begin() + i + 3, area.nwCorner.begin(), [](std::string& s) -> float {
+						return std::stof(s);
+					});
+				}
+				else if (cmd.actionParams.at(i) == "seCorner") {
+					++i;
+					std::transform(cmd.actionParams.begin() + ++i, cmd.actionParams.begin() + i + 3, area.seCorner.begin(), [](std::string& s) -> float {
+						return std::stof(s);
+					});
+				}
+				else if (cmd.actionParams.at(i) == "NorthEastZ") area.NorthEastZ = std::stof(cmd.actionParams.at(++i));
+				else if (cmd.actionParams.at(i) == "SouthWestZ") area.SouthWestZ = std::stof(cmd.actionParams.at(++i));
+				else if (cmd.actionParams.at(i) == "PlaceID") area.PlaceID = std::clamp<ShortID>(std::stoul(cmd.actionParams.at(++i), nullptr, 0u), 0u, UINT16_MAX);
+
+				else if (cmd.actionParams.at(i) == "InheritVisibilityFromAreaID") area.InheritVisibilityFromAreaID = std::stoul(cmd.actionParams.at(++i), nullptr, 0u);
+				else if (cmd.actionParams.at(i) == "LightIntensity") 
+					std::transform(cmd.actionParams.begin() + ++i, cmd.actionParams.begin() + i + 4, area.LightIntensity.value().begin(), [](std::string& s) -> float {
+						return std::stof(s);
+					});
+			}
+			break;
+		case TargetType::HIDE_SPOT:
+		{
+			// Error handling.
+			if (!cmd.hideSpotID.has_value()) {
+				std::cerr << "fatal: hide spot index not defined.\n";
+				std::filesystem::remove(TempPath);
+				return false;
+			}
+			if (std::clamp<unsigned char>(cmd.hideSpotID.value(), 0, area.hideSpotData.first) != cmd.hideSpotID.value()) {
+				std::cerr << "Hide spot index parameter is out of range.\n";
+				std::filesystem::remove(TempPath);
+				return false;
+			}
+			// Create hide spot.
+			area.hideSpotData.second.emplace_back();
+			area.hideSpotData.first++;
+			// Edit data.
+			for (size_t i = 0; i < cmd.actionParams.size(); i++)
+			{
+				if (cmd.actionParams.at(i) == "id") area.hideSpotData.second.back().ID = std::stoi(cmd.actionParams.at(++i), nullptr, 0u);
+				else if (cmd.actionParams.at(i) == "position") {
+					++i;
+					std::transform(cmd.actionParams.begin() + i, cmd.actionParams.begin() + i + 3, area.hideSpotData.second.back().position.begin(), [](const std::string& s) -> float {
+						return std::stof(s);
+					});
+				}
+				else if (cmd.actionParams.at(i) == "attributes") area.hideSpotData.second.back().Attributes = std::stoi(cmd.actionParams.at(++i), nullptr, 0u);
+			}
+		}
+		break;
+	}
+	
+	// Appending a new area.
+	if (cmd.target == TargetType::AREA) {
+		// Ensure the area will be properly written.
+		if (!area.WriteData(tmpfile, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
+			std::cerr << "fatal: Failed to write area data.\n";
+		}
+		// Increment area count.
+		++inFile.GetAreaCount();
+		inFile.areas.value().push_back(area);
+		inBuf.close();
+		if (!inBuf.open(inFile.GetFilePath(), std::ios_base::out | std::ios_base::binary)) {
+			std::cerr << "fatal: Could not open buffer.\n";
+			return false;
+		}
+		// Now write data.
+		inBuf.pubseekpos(0u, std::ios_base::out);
+		if (!inFile.WriteData(inBuf)) {
+			std::cerr << "fatal: Failed to write changed NAV data.\n";
+		}
+		std::cout << "Final Pos: " << inBuf.pubseekoff(0, std::ios_base::cur) << '\n';
+	}
+	else {
+		inBuf.pubseekpos(areaLoc.value(), std::ios_base::in | std::ios_base::out);
+		// Ensure the area data will be properly written.
+		if (!area.WriteData(tmpfile, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
+			std::cerr << "Failed to write area data to temporary file!\n";
+			std::filesystem::remove(TempPath);
+			return false;
+		}
+		tmpfile.pubseekpos(0u, std::ios_base::in | std::ios_base::out);
+		if (!area.ReadData(tmpfile, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
+			std::cerr << "Failed to read area data to temporary file!\n";
+			std::filesystem::remove(TempPath);
+			return false;
+		}
+		// Clear. Write to inFile.
+		if (!area.WriteData(inBuf, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
+			std::cerr << "Failed to read area data to input file!\n";
+			std::filesystem::remove(TempPath);
+			return false;
+		}
+	}
+	std::filesystem::remove(TempPath);
 	return true;
 }
 
@@ -325,8 +528,9 @@ bool NavTool::ActionEdit(ToolCmd& cmd)
 	std::filebuf inBuf;
 	if (!inBuf.open(inFile.GetFilePath(), std::ios_base::in | std::ios_base::out | std::ios_base::binary)) {
 		std::cerr << "fatal: Failed to open buffer.\n";
+		std::filesystem::remove(TempPath);
 		return false;
-	}	
+	}
 	/* 
 		TODO: Actually set stuff.
 	*/
@@ -350,6 +554,7 @@ bool NavTool::ActionEdit(ToolCmd& cmd)
 	// Processing areas.
 	if (!cmd.areaLocParam.has_value()) {
 		std::cerr << "fatal: area index not defined.\n";
+		std::filesystem::remove(TempPath);
 		return false;
 	}
 	std::optional<std::streampos> areaLoc;
@@ -362,6 +567,7 @@ bool NavTool::ActionEdit(ToolCmd& cmd)
 		// Out of bounds.
 		if (std::clamp(cmd.areaLocParam.value().second, 0u, inFile.GetAreaCount()) != cmd.areaLocParam.value().second) {
 			std::cerr << "Specified area index is out of range.\n";
+			std::filesystem::remove(TempPath);
 			return false;
 		}
 		areaLoc = inFile.GetAreaDataLoc();
@@ -371,6 +577,7 @@ bool NavTool::ActionEdit(ToolCmd& cmd)
 			if (areaSize.has_value()) areaLoc.value() += areaSize.value();
 			else {
 				std::cerr << "fatal: Could not get area size!\n";
+				std::filesystem::remove(TempPath);
 				return false;
 			}
 		}
@@ -385,6 +592,7 @@ bool NavTool::ActionEdit(ToolCmd& cmd)
 	inBuf.pubseekpos(areaLoc.value(), std::ios_base::in | std::ios_base::out);
 	if (!area.ReadData(inBuf, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
 		std::cerr << "fatal: Could not get area data.\n";
+		std::filesystem::remove(TempPath);
 		return false;
 	}
 	// Now we edit the target data.
@@ -422,13 +630,14 @@ bool NavTool::ActionEdit(ToolCmd& cmd)
 			// Error handling.
 			if (!cmd.hideSpotID.has_value()) {
 				std::cerr << "fatal: hide spot index not defined.\n";
+				std::filesystem::remove(TempPath);
 				return false;
 			}
 			if (std::clamp<unsigned char>(cmd.hideSpotID.value(), 0, area.hideSpotData.first) != cmd.hideSpotID.value()) {
 				std::cerr << "Hide spot index parameter is out of range.\n";
+				std::filesystem::remove(TempPath);
 				return false;
 			}
-
 			// Get hide spot.
 			NavHideSpot& hSpot = area.hideSpotData.second[cmd.hideSpotID.value()];
 			// Edit data.
@@ -437,7 +646,7 @@ bool NavTool::ActionEdit(ToolCmd& cmd)
 				if (cmd.actionParams.at(i) == "id") hSpot.ID = std::stoi(cmd.actionParams.at(++i), nullptr, 0u);
 				else if (cmd.actionParams.at(i) == "position") {
 					++i;
-					std::transform(cmd.actionParams.begin() + i, cmd.actionParams.begin() + i + 2, hSpot.position.begin(), [](const std::string& s) -> float {
+					std::transform(cmd.actionParams.begin() + i, cmd.actionParams.begin() + i + 3, hSpot.position.begin(), [](const std::string& s) -> float {
 						return std::stof(s);
 					});
 				}
@@ -450,18 +659,22 @@ bool NavTool::ActionEdit(ToolCmd& cmd)
 	// Ensure the area data will be properly written.
 	if (!area.WriteData(tmpfile, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
 		std::cerr << "Failed to write area data to temporary file!\n";
+		std::filesystem::remove(TempPath);
 		return false;
 	}
 	tmpfile.pubseekpos(0u, std::ios_base::in | std::ios_base::out);
 	if (!area.ReadData(tmpfile, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
 		std::cerr << "Failed to read area data to temporary file!\n";
+		std::filesystem::remove(TempPath);
 		return false;
 	}
 	// Clear. Write to inFile.
 	if (!area.WriteData(inBuf, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
 		std::cerr << "Failed to read area data to input file!\n";
+		std::filesystem::remove(TempPath);
 		return false;
 	}
+	std::filesystem::remove(TempPath);
 	return true;
 }
 
@@ -574,11 +787,11 @@ bool NavTool::ActionInfo(ToolCmd& cmd)
 					std::cerr << "Hide spot #" << std::to_string(cmd.hideSpotID.value()) << " is out of range.\n";
 					return false;
 				}
-				// Output ID.
-				std::cout << "Hide Spot #"<<std::to_string(cmd.hideSpotID.value())<<" of Area #"<<targetArea.ID << ":\n";
-				std::cout.fill(' ');
-				std::cout << std::setw(4) << "\tPosition: ";
+				// Get hide spot data.
 				NavHideSpot& hideSpotRef = targetArea.hideSpotData.second.at(cmd.hideSpotID.value());
+				// Output ID.
+				std::cout << "Hide Spot #"<<std::to_string(cmd.hideSpotID.value())<<" of Area #"<<targetArea.ID << ":\n\tID: " << std::to_string(hideSpotRef.ID) << '\n';
+				std::cout << std::setw(4) << "\tPosition: ";
 				// Output hide spot position
 				for (size_t i = 0; i < hideSpotRef.position.size(); i++)
 				{
@@ -671,5 +884,7 @@ bool NavTool::ActionInfo(ToolCmd& cmd)
 
 int main(int argc, char **argv) {
 	NavTool navApp(argc, argv);
+	// Remove temporary files.
+	std::filesystem::remove_all(std::filesystem::temp_directory_path().append("nav/"));
 	exit(EXIT_SUCCESS);
 }

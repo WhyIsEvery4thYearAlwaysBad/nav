@@ -1,9 +1,8 @@
-1. [ ] Setup test automation!
-
-2. [ ] Finish command system.
-	
-[ ] Write to temporary files.
-[ ] 
+1.	[ ] Finish command system.
+	* [X] Write to temporary files for edits.
+	* [ ] Work out the syntax for setting properties for `nav create` and `nav edit`.
+	* [ ] Finish `nav create` and `nav edit`
+2. [ ] Setup *proper* test automation!
 
 // I'm not sure this is a good idea.
 Triage [ ] Setup variable-length NAV data system.

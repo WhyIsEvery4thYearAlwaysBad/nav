@@ -56,13 +56,15 @@ std::optional<unsigned char> getAreaAttributeFlagSize(const unsigned int& MajorV
 #define HIDE_SPOT_SIZE (VALVE_INT_SIZE + (VALVE_FLOAT_SIZE * 3) + VALVE_CHAR_SIZE)
 class NavHideSpot {
 public:
-	unsigned int ID;
-	std::array<float, 3> position;
-	unsigned char Attributes;
+	unsigned int ID; // ID of the hide spot.
+	std::array<float, 3> position; // position
+	unsigned char Attributes; // Attributes.
 
 	bool ReadData(std::streambuf& in);
 	void OutputData(std::ostream& out);
 	bool WriteData(std::streambuf& out);
+
+	bool hasSameNAVData(const NavHideSpot& rhs) const;
 };
 
 // Approach spots
@@ -76,6 +78,8 @@ public:
 	// Write data to stream.
 	bool WriteData(std::streambuf& out);
 	bool ReadData(std::streambuf& in);
+
+	std::optional<bool> hasSameNAVData(NavApproachSpot& rhs);
 };
 
 #define ENCOUNTER_SPOT_SIZE 5 // Total size of encounter spot data.
@@ -109,6 +113,8 @@ public:
 
 	// Output data.
 	void Output(std::ostream& out);
+
+	std::optional<bool> hasSameNAVData(NavEncounterPath& rhs);
 };
 
 #define VISIBLE_AREA_SIZE 5 // Total size of visible area data.
@@ -120,6 +126,8 @@ public:
 
 	bool WriteData(std::streambuf& out);
 	bool ReadData(std::streambuf& in);
+
+	bool hasSameNAVData(const NavVisibleArea& rhs) const;
 };
 
 #endif
