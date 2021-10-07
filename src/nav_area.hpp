@@ -74,7 +74,7 @@ class NavArea {
 	// Game-specific datum count
 	size_t customDataSize = 0u;
 	// Game-specific data.
-	std::string customData;
+	std::vector<unsigned char> customData;
 	// Funcs
 	void OutputData(std::ostream& ostream);
 

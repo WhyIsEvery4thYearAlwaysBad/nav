@@ -262,7 +262,10 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 	if (buf.in_avail() > 0) {
 		customDataSize = getCustomDataSize(buf, GetAsEngineVersion(MajorVersion, {}));
 		buf.pubseekoff(-customDataSize, std::ios_base::cur);
-		if (buf.sgetn(customData.data(), customDataSize) != customDataSize) {
+		// Reset data.
+		customData.clear();
+		customData.reserve(customDataSize);
+		if (buf.sgetn(reinterpret_cast<char*>(customData.data()), customDataSize) != customDataSize) {
 			#ifdef NDEBUG
 			std::cerr << "NavArea::ReadData(): Could not read custom data!\n";
 			#endif

@@ -55,7 +55,7 @@ std::pair<bool, std::string> TestNavAreaDataIO() {
 
 		//if (!area_init.hasSameFileData(sample)) return {false, "Area Data I/O: Failed!\nReason: Mismatched Read/Written data!"};
 	}
-	return {true, "Area Data I/O: Succeeded!" };
+	return {true, "Area Data I/O: Passed!" };
 }
 
 // Tests the I/O of encounter paths.
@@ -74,4 +74,20 @@ std::pair<bool, std::string > TestEncounterPathIO() {
 	if (!sample.ReadData(*TestFile.rdbuf())) return {false, "Encounter path I/O: Read Failed!"};
 	
 	return {true, "Encounter Path I/O: Passed!"};
+}
+
+// Tests the I/O of encounter spots.
+// True on success, false on failure.
+std::pair<bool, std::string > TestEncounterSpotIO() {
+	NavEncounterSpot init;
+	init.OrderID = 3u;
+	init.ParametricDistance = 4.0f;
+
+	NavEncounterSpot sample;
+	std::stringstream TestFile;
+	// Test
+	if (!init.WriteData(*TestFile.rdbuf())) return {false, "Encounter Spot I/O: Write Failed!"};
+	if (!sample.ReadData(*TestFile.rdbuf())) return {false, "Encounter Spot I/O: Read Failed!"};
+	
+	return {true, "Encounter Spot I/O: Passed!"};
 }

@@ -1,5 +1,6 @@
 #ifndef NAV_BASE_HPP
 #define NAV_BASE_HPP
+#include <map>
 #include <fstream>
 #include <optional>
 #include <vector>
@@ -27,6 +28,10 @@ enum class Direction : unsigned char {
 	West,
 	Count
 };
+
+// Maps.
+extern std::map<Direction, std::string> directionToStr;
+extern std::map<std::string, Direction> strToDirection;
 
 // Engine Version
 enum EngineVersion {

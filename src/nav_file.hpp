@@ -21,7 +21,7 @@ class NavFile {
 		std::streampos LadderDataLoc = -1; // Ladder Data location.
 	public:
 		NavFile();
-		NavFile(const std::string& path);
+		NavFile(const std::filesystem::path& path);
 		~NavFile();
 		
 		// Accessor functions.
@@ -43,7 +43,7 @@ class NavFile {
 		EngineVersion GetEngineVersion();
 
 		// Fill meta data from file stream.
-		void FillMetaDataFromFile();
+		bool FillMetaDataFromFile();
 		bool IsValidFile();
 		// Travel through data of an area.
 		// Returns data length of an area (at specified file position).

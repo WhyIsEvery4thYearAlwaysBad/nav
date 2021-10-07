@@ -7,11 +7,15 @@
 // True on success, false on failure.
 std::pair<bool, std::string > TestNavConnectionDataIO();
 
-// Tests the I/O of area data.
-// True on success, false on failure.
-std::pair<bool, std::string > TestNavAreaDataIO();
-
 // Tests the I/O of encounter paths.
 // True on success, false on failure.
 std::pair<bool, std::string> TestEncounterPathIO();
+
+// Tests the I/O of encounter spots.
+// True on success, false on failure.
+std::pair<bool, std::string > TestEncounterSpotIO();
+
+// Tests the I/O of area data.
+// True on success, false on failure.
+std::pair<bool, std::string > TestNavAreaDataIO();
 #endif

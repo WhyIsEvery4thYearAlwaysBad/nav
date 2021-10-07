@@ -9,18 +9,9 @@
 
 NavFile::NavFile() {}
 
-NavFile::NavFile(const std::string& path)
+NavFile::NavFile(const std::filesystem::path& path)
 : FilePath(path) {
-	
-	std::ifstream navFile(FilePath, std::ios_base::in | std::ios_base::binary);
-	if (navFile.is_open() && navFile.good()) {
-		navFile.close();
-		FillMetaDataFromFile();
-	}
-	else {
-		std::cerr << "fatal: Filestream (" << FilePath << ") is screwed up.\n";
-		return;
-	}
+
 }
 
 NavFile::~NavFile() {}
@@ -83,45 +74,45 @@ bool NavFile::IsValidFile() {
 }
 
 // TODO: Error checking.
-void NavFile::FillMetaDataFromFile() {
+bool NavFile::FillMetaDataFromFile() {
 	std::ifstream navFile;
 	navFile.open(FilePath, std::ios_base::in | std::ios_base::binary);
-	if (!navFile.good()) return;
+	if (!navFile.good()) return false;
 	// Get MagicNumber.
-	if (!navFile.read(reinterpret_cast<char*>(&MagicNumber), VALVE_INT_SIZE)) return;
+	if (!navFile.read(reinterpret_cast<char*>(&MagicNumber), VALVE_INT_SIZE)) return false;
 	if (!IsValidFile()) exit(EXIT_FAILURE);
 	// Get major version
-	if (!navFile.read(reinterpret_cast<char*>(&MajorVersion), VALVE_INT_SIZE)) return;
+	if (!navFile.read(reinterpret_cast<char*>(&MajorVersion), VALVE_INT_SIZE)) return false;
 	// Get minor version.
 	if (MajorVersion >= 10) {
 		unsigned int placeholder;
-		if (!navFile.read(reinterpret_cast<char*>(&placeholder), VALVE_INT_SIZE)) return;
+		if (!navFile.read(reinterpret_cast<char*>(&placeholder), VALVE_INT_SIZE)) return false;
 		MinorVersion = placeholder;
 	}
 	// Get BSP Size
 	if (MajorVersion >= 4) {
 		unsigned int placeholder;
-		if (!navFile.read(reinterpret_cast<char*>(&placeholder), VALVE_INT_SIZE)) return;
+		if (!navFile.read(reinterpret_cast<char*>(&placeholder), VALVE_INT_SIZE)) return false;
 		BSPSize = placeholder;
 	}
 	// Is mesh file analyzed.
 	if (MajorVersion >= 14) {
 		bool placeholder;
-		if (!navFile.read(reinterpret_cast<char*>(&placeholder), VALVE_CHAR_SIZE)) return;
+		if (!navFile.read(reinterpret_cast<char*>(&placeholder), VALVE_CHAR_SIZE)) return false;
 		isAnalyzed = placeholder;
 	}
 	// Get Places
-	if (!navFile.read(reinterpret_cast<char*>(&PlaceCount), VALVE_SHORT_SIZE)) return;
+	if (!navFile.read(reinterpret_cast<char*>(&PlaceCount), VALVE_SHORT_SIZE)) return false;
 	for (size_t i = 0; i < PlaceCount; i++)
 	{
 		unsigned short nameLength;
-		if (!navFile.read(reinterpret_cast<char*>(&nameLength), VALVE_SHORT_SIZE)) return;
-		if (!navFile.seekg(nameLength, std::ios_base::cur)) return;
+		if (!navFile.read(reinterpret_cast<char*>(&nameLength), VALVE_SHORT_SIZE)) return false;
+		if (!navFile.seekg(nameLength, std::ios_base::cur)) return false;
 	}
 	// Has unnamed areas?
-	if (MajorVersion >= 11) if (!(hasUnnamedAreas = (bool)navFile.get())) return;
+	if (MajorVersion >= 11) if (!(hasUnnamedAreas = (bool)navFile.get())) return false;
 	// Traverse area data
-	if (!navFile.read(reinterpret_cast<char*>(&AreaCount), VALVE_INT_SIZE)) return;
+	if (!navFile.read(reinterpret_cast<char*>(&AreaCount), VALVE_INT_SIZE)) return false;
 	AreaDataLoc = navFile.tellg(); // Mark the location of area data.
 	for (size_t i = 0; i < AreaCount; i++)
 	{
@@ -136,8 +127,9 @@ void NavFile::FillMetaDataFromFile() {
 	}
 	// Ladders
 	LadderDataLoc = navFile.tellg();
-	if (!navFile.read(reinterpret_cast<char*>(&LadderCount), VALVE_INT_SIZE)) return;
-	if (!navFile.seekg(LADDER_SIZE * LadderCount, std::ios_base::cur)) return;
+	if (!navFile.read(reinterpret_cast<char*>(&LadderCount), VALVE_INT_SIZE)) return false;
+	if (!navFile.seekg(LADDER_SIZE * LadderCount, std::ios_base::cur)) return false;
+	return true;
 }
 
 // Travel through data of an area.
@@ -249,8 +241,8 @@ std::optional<std::streampos> NavFile::FindArea(const unsigned int& ID) {
 			}
 			else {
 				std::cerr << "FATAL: Cannot retrive area data size!\n";
-				exit(EXIT_FAILURE);
-			}
+				return {};
+;			}
 		}
 	}
 	return {};

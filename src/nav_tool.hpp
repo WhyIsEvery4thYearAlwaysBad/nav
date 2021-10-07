@@ -1,16 +1,18 @@
 #ifndef NAV_TOOL_HPP
 #define NAV_TOOL_HPP
 #include <vector>
+#include "utils.hpp"
+#include "nav_base.hpp"
 #include "nav_file.hpp"
 // Type of command.
-enum class CmdType {
+enum class ActionType {
 	CREATE, // Create area.
+	EDIT, // Edit data.
 	CONNECT, // Connects two areas/ladder.
 	DISCONNECT, // Disconnects two areas/ladder.
 	DELETE, // Deletes an area/ladder
 	MOVE, // Moves an area/ladder
 	INFO, // Prints info of nav file.
-	COMPRESS, // Compress area IDs
 	TEST, // Test program.
 
 	INVALID,
@@ -32,13 +34,17 @@ enum class TargetType {
 };
 
 struct ToolCmd {
-	CmdType type = CmdType::INVALID;
+	ActionType cmdType = ActionType::INVALID;
 	TargetType target = TargetType::INVALID;
-	NavFile file;
+	std::optional<NavFile> file;
 	// IDs for type of data.
-	std::optional<IntID> areaID, encounterPathID;
+	std::optional<IntIndex> areaLocParam;
+	std::optional<IntID> encounterPathID, connectionID;
 	std::optional<ByteID> encounterSpotID, hideSpotID;
-	std::string param;
+	std::optional<Direction> direc;
+	// Parameters for the action.
+	std::optional<size_t> RequestedIndex;
+	std::deque<std::string> actionParams;
 };
 
 class NavTool {
@@ -53,5 +59,10 @@ class NavTool {
 
 	std::optional<ToolCmd> ParseCommandLine(int& argc, char **argv);
 	bool DispatchCommand(ToolCmd& cmd);
+	// Executes the create action.
+	// True if successful
+	bool ActionCreate(ToolCmd& cmd);
+	bool ActionEdit(ToolCmd& cmd);
+	bool ActionInfo(ToolCmd& cmd);
 };
 #endif

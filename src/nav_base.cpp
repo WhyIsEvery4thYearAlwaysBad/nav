@@ -1,14 +1,23 @@
 #include <iostream>
 #include <optional>
 #include <map>
-#include <any>
+#include <regex>
 #include "nav_base.hpp"
 
+// Map between Direction and string.
 std::map<Direction, std::string> directionToStr = {
 	{Direction::North, "North"},
 	{Direction::South, "South"},
 	{Direction::West, "West"},
 	{Direction::East, "East"}
+};
+
+// Map between string and Direction.
+std::map<std::string, Direction> strToDirection = {
+	{ "north", Direction::North },
+	{ "south", Direction::South },
+	{ "east", Direction::East },
+	{ "west", Direction::West }
 };
 
 /*
@@ -263,15 +272,23 @@ bool NavEncounterPath::WriteData(std::streambuf& out) {
 	{
 		NavEncounterSpot spot;
 		if (!spot.WriteData(out)) {
+			#ifdef NDEBUG
 			std::cerr << "NavEncounterPath::WriteData(): Could not write hide spot data !\n";
+			#endif
 			return false;
 		}
 		spotContainer.push_back(spot);
 	}
 	else {
+		NavEncounterSpot blank;
 		for (size_t i = 0; i < spotCount; i++)
 		{
-			out.sputn("\0\0\0\0\0", 5);
+			if (!blank.WriteData(out)) {
+				#ifdef NDEBUG
+				std::cerr << "NavEncounterPath::WriteData(): Could not write hide spot data !\n";
+				#endif
+				return false;
+			}
 		}
 	}
 	return true;
