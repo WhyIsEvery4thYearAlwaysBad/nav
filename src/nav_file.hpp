@@ -61,6 +61,7 @@ class NavFile {
 		std::optional<size_t> GetAreaCustomDataSize();
 
 		// Find an area with ID.
+		// Retunrs the stream position if successful.
 		std::optional<std::streampos> FindArea(const unsigned int& ID);
 };
 #endif

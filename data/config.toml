@@ -1,0 +1,53 @@
+# Config stores string maps to NAV datum, and custom data.
+# String Mappings to data for Source Games.
+# Keys represent the string, values are the values that the program uses to determine the property to edit.
+# Values usable:
+# * NAV_AREA_ID - The Area ID.
+# * NAV_AREA_ATTRIBUTE_FLAG - Area Attribute Flag.
+# * NAV_AREA_NORTHWEST_CORNER - Area's north west corner vector.
+# * NAV_AREA_LIGHT_INTENSITY
+# * NAV_AREA_VIS_INHERITANCE 
+
+# General
+[map]
+NAV_MESH_MAGIC_NUMBER = "NAV_MESH_MAGIC_NUMBER"
+NAV_MESH_VERSION = "NAV_MESH_VERSION"
+# Area ID.
+area_id = "NAV_AREA_ID"
+NAV_AREA_ID = "NAV_AREA_ID"
+# Attributes
+NAV_AREA_ATTRIBUTE_FLAG = "NAV_AREA_ATTRIBUTE_FLAG"
+attributes = "NAV_AREA_ATTRIBUTE_FLAG" # Attribute Flag
+# North-West Corner vector.
+NAV_AREA_NORTHWEST_CORNER = "NAV_AREA_NORTHWEST_CORNER"
+nwCorner = "NAV_AREA_NORTHWEST_CORNER"
+# South-East Corner vector.
+NAV_AREA_SOUTHWEST_CORNER = "NAV_AREA_SOUTHWEST_CORNER"
+seCorner = "NAV_AREA_SOUTHWEST_CORNER"
+# NorthEastZ
+NAV_AREA_NORTHEAST_Z = "NAV_AREA_NORTHEAST_Z"
+NorthEastZ = "NAV_AREA_NORTHEAST_Z"
+# SouthEastZ
+NAV_AREA_SOUTHEAST_Z = "NAV_AREA_SOUTHEAST_Z"
+SouthEastZ = "NAV_AREA_SOUTHEAST_Z"
+
+# InheritVisibilityFromAreaID
+NAV_AREA_VIS_INHERITANCE = "NAV_AREA_VIS_INHERITANCE"
+vis_inherit = "NAV_AREA_VIS_INHERITANCE"
+
+# Hide Spot
+NAV_HIDE_SPOT_ID = "NAV_HIDE_SPOT_ID"
+hide_spot_id = "NAV_HIDE_SPOT_ID"
+
+[map.nav_version]
+	# Specific maps for Team Fortress 2
+	[map.nav_version.16]
+	# Subversion
+	NAV_MESH_SUBVERSION = "NAV_MESH_SUBVERSION"
+	subversion = "NAV_MESH_SUBVERSION"
+	# Places
+	NAV_AREA_PLACE_ID = "NAV_AREA_PLACE_ID"
+	place_id = "NAV_AREA_PLACE_ID"
+	# Light Intensity
+	NAV_AREA_LIGHT_INTENSITY = "NAV_AREA_LIGHT_INTENSITY"
+	light_intensities = "NAV_AREA_LIGHT_INTENSITY"

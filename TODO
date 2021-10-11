@@ -1,6 +1,9 @@
 1.	[ ] Finish command system.
 	* [X] Write to temporary files for edits.
-	* [ ] Work out the syntax for setting properties for `nav create` and `nav edit`.
+	* [ ] Work out the syntax for setting properties for `nav create`
+	* [X] Work out syntax for `nav edit`.
+		* Can be two numerical pairs, first being the offset, second being value. This is really only needed if the program doesn't support.
+		* Can be a string that is mapped to data. They will be loaded from a TOML file.
 	* [ ] Finish `nav create` and `nav edit`
 2. [ ] Setup *proper* test automation!
 

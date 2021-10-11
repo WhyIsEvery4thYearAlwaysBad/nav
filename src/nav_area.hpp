@@ -24,7 +24,7 @@ class NavArea {
 	// Total size (in bytes)
 	size_t size = 0u;
 	/* Nav Area data */
-	IntID ID;// ID of the NavArea. 
+	IntID ID = 0u;// ID of the NavArea. 
 	unsigned int Flags; // Attributes set on this area.
 	std::array<float, 3> nwCorner; // Location of the north-west corners.
 	std::array<float, 3> seCorner; // Location of the south-east corners.
@@ -58,7 +58,7 @@ class NavArea {
 	// Game-specific data.
 	std::vector<unsigned char> customData;
 	// Funcs
-	void OutputData(std::ostream& ostream);
+	void OutputData(std::ostream& ostream) const;
 
 	// Write data to stream.
 	// Returns true if successful, false on failure.

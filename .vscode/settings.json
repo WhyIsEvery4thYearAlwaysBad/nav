@@ -67,6 +67,7 @@
 		"iomanip": "cpp",
 		"span": "cpp",
 		"filesystem": "cpp",
-		"codecvt": "cpp"
+		"codecvt": "cpp",
+		"thread": "cpp"
 	}
 }

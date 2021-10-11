@@ -10,11 +10,33 @@
 #include <regex>
 #include <iterator>
 #include <span>
+#include "toml++/toml.hpp"
 #include "utils.hpp"
+#include "property_func_map.hpp"
 #include "nav_tool.hpp"
 #include "test_automation.hpp"
 
 #define NDEBUG
+// Default TOML config.
+std::string defaultConf = R"(
+[map]
+magic_number = "NAV_MESH_MAGIC_NUMBER"
+version = "NAV_MESH_VERSION"
+
+area_id = "NAV_AREA_ID" # Area ID
+attributes = "NAV_AREA_FLAG" # Attribute Flag
+nwCorner = "NAV_AREA_NORTHWEST_CORNER"
+seCorner = "NAV_AREA_SOUTHWEST_CORNER"
+NorthEastZ = "NAV_AREA_NORTHEAST_Z" # NorthEastZ
+vis_inherit = "NAV_AREA_VIS_INHERITANCE" # InheritVisibilityFromAreaID
+
+# Specific data for Team Fortress 2
+[map.version.16]
+subversion = "NAV_MESH_SUBVERSION"
+
+[map.version.16.custom_data]
+offset = 0
+length = 4)";
 
 NavTool::NavTool() {
 	
@@ -23,6 +45,28 @@ NavTool::NavTool() {
 NavTool::NavTool(int& argc, char** argv) {
 	std::optional<ToolCmd> cmdResult = ParseCommandLine(argc, argv);
 	if (cmdResult.has_value()) {
+		// Try to load in toml config.
+		{
+			if (getenv("CONFIG")) {
+				std::filesystem::path path_to_config = std::string(getenv("CONFIG"));
+				// Does it exist?
+				if (!std::filesystem::exists(path_to_config)) {
+					std::clog << "CONFIG file does not exist.\n";
+					exit(EXIT_FAILURE);
+				}
+				// Validate path.
+				std::filesystem::file_status stats = std::filesystem::status(path_to_config);
+				// Needs to be able to read file.
+				if (!((bool)(stats.permissions() & std::filesystem::perms::owner_read))) {
+					std::clog << "warning: Can't read CONFIG file. Ignoring." << std::endl;
+				}
+
+				// Attempt to load toml config.
+				programConfig = toml::parse_file(path_to_config.string());
+
+				// TODO: Validate loading of toml file.
+			}
+		}
 		cmd = cmdResult.value();
 		cmdResult.reset();
 		if (!DispatchCommand(cmd)) exit(EXIT_FAILURE);
@@ -38,8 +82,6 @@ NavTool::~NavTool() {
 const std::map<std::string, ActionType> cmdStrToCmdType = {
 	{"create", ActionType::CREATE},
 	{"edit", ActionType::EDIT},
-	{"connect", ActionType::CONNECT},
-	{"disconnect", ActionType::DISCONNECT},
 	{"delete",  ActionType::DELETE},
 	{"info", ActionType::INFO},
 	{"test", ActionType::TEST}
@@ -52,8 +94,12 @@ const std::map<std::string, TargetType> strToTargetType = {
 	{"connection", TargetType::CONNECTION},
 	{"encounter-path", TargetType::ENCOUNTER_PATH},
 	{"encounter-spot", TargetType::ENCOUNTER_SPOT},
-	{"hide-spot", TargetType::HIDE_SPOT}
+	{"hide-spot", TargetType::HIDE_SPOT},
+	{"ladder", TargetType::LADDER}
 };
+
+// Map between string and data offset. Used for the edit command.
+const std::map<std::string, size_t> strToOffset;
 
 // Parses Command line.
 // Returns ToolCmd if successful, nothing on failure.
@@ -144,7 +190,7 @@ std::optional<ToolCmd> NavTool::ParseCommandLine(int& argc, char* argv[]) {
 				std::cerr << "Missing encounter path index.\n";
 				return {};
 			}
-			cmd.encounterPathID = std::stoul(argv[argit + 1]);
+			cmd.encounterPathIndex = std::stoul(argv[argit + 1]);
 			argit += 2u;
 			break;
 		case TargetType::ENCOUNTER_SPOT:
@@ -186,8 +232,11 @@ std::optional<ToolCmd> NavTool::ParseCommandLine(int& argc, char* argv[]) {
 				}
 				else cmd.direc = strDirecIt->second;
 			}
-			cmd.connectionID = std::stoul(argv[argit + 2]);
+			cmd.connectionIndex = std::stoul(argv[argit + 2]);
 			argit += 3u;
+			break;
+		case TargetType::APPROACH_SPOT:
+			if (std::regex_match(argv[argit + 1], std::regex("\\d+"))) cmd.approachSpotIndex;
 			break;
 		case TargetType::INVALID:
 		default:
@@ -205,16 +254,9 @@ std::optional<ToolCmd> NavTool::ParseCommandLine(int& argc, char* argv[]) {
 		{
 			cmd.cmdType = strMapIt->second;
 			// Get action parameters.
-			if (cmd.cmdType == ActionType::EDIT) {
-				while (++argit < argc)
-				{
-					cmd.actionParams.emplace_back(argv[argit]);
-				}
-				if (cmd.actionParams.size() < 2)
-				{
-					std::cerr << "Missing parameters.\n";
-					return {};
-				}
+			while (++argit < argc)
+			{
+				cmd.actionParams.emplace_back(argv[argit]);
 			}
 		}
 	}
@@ -261,7 +303,10 @@ bool NavTool::DispatchCommand(ToolCmd& cmd) {
 	case ActionType::INFO:
 		return ActionInfo(cmd);
 		break;
-	
+	// Delete something.
+	case ActionType::DELETE:
+		return ActionDelete(cmd);
+		break;
 	// Test
 	case ActionType::TEST:
 		{
@@ -332,11 +377,13 @@ bool NavTool::ActionCreate(ToolCmd& cmd) {
 		break;
 	}
 
-	NavArea area;
+	if (inFile.GetAreaCount() < 1 && cmd.target != TargetType::AREA) {}
+	if (!inFile.areas.has_value()) inFile.areas = std::vector<NavArea>(inFile.GetAreaCount());
+	
+	auto areaIt = inFile.areas.value().end();
 	std::optional<std::streampos> areaLoc;
 	// Find the area, unless if we're creating an area.
 	if (cmd.target != TargetType::AREA) {
-		inBuf.pubseekpos(inFile.GetAreaDataLoc());
 		// Processing areas.
 		if (!cmd.areaLocParam.has_value()) {
 			std::cerr << "fatal: area index not defined.\n";
@@ -344,8 +391,9 @@ bool NavTool::ActionCreate(ToolCmd& cmd) {
 			return false;
 		}
 		// It's an ID.
-		if (cmd.areaLocParam.value().first == true) 
+		if (cmd.areaLocParam.value().first == true) {
 			areaLoc = inFile.FindArea(cmd.areaLocParam.value().second);
+		}
 		// It's an index
 		else
 		{
@@ -355,73 +403,30 @@ bool NavTool::ActionCreate(ToolCmd& cmd) {
 				std::filesystem::remove(TempPath);
 				return false;
 			}
-			areaLoc = inFile.GetAreaDataLoc();
-			for (size_t i = 0; i < cmd.areaLocParam.value().second; i++)
-			{
-				auto areaSize = inFile.TraverseNavAreaData(areaLoc.value());
-				if (areaSize.has_value()) areaLoc.value() += areaSize.value();
-				else {
-					std::cerr << "fatal: Could not get area size!\n";
-					std::filesystem::remove(TempPath);
-					return false;
-				}
-			}
-		}
-		
-		if (!areaLoc.has_value()) {
-			std::cerr << "fatal: Failed to get area position!\n";
-			return false;
-		}
-		// Got the area location. Now get data.
-		inBuf.pubseekpos(areaLoc.value(), std::ios_base::in | std::ios_base::out);
-		if (!area.ReadData(inBuf, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
-			std::cerr << "fatal: Could not get area data.\n";
-			std::filesystem::remove(TempPath);
-			return false;
+			// Set area iterator to the located area at index.
+			areaIt = inFile.areas.value().begin() + cmd.areaLocParam.value().second;
 		}
 	}
 	// Now we edit the target data.
 	switch (cmd.target) {
 		case TargetType::AREA:
-			/*
-				BLank 
-			*/
+			// Add area.
+			areaIt = inFile.areas.value().emplace(areaIt);
 			// Set new area ID.
-			if (cmd.areaLocParam.value().first == true) area.ID = cmd.areaLocParam.value().second;
-			else area.ID = inFile.GetAreaCount();
-			// Set blank coords.
-			area.nwCorner = {0.0f, 0.0f, 0.0f};
-			area.seCorner = {0.0f, 0.0f, 0.0f};
-			// Fill custom data.
-			area.customDataSize = getCustomDataSize(inBuf, GetAsEngineVersion(inFile.GetMajorVersion(), inFile.GetMinorVersion()));
-			area.customData.resize(area.customDataSize, 0);
-			// Get the properties from the arguments and set the area properties to those values.
-			for (size_t i = 0; i < cmd.actionParams.size(); i++)
-			{
-				if (cmd.actionParams.at(i) == "id") area.ID = std::stoul(cmd.actionParams.at(++i), nullptr, 0u);
-				else if (cmd.actionParams.at(i) == "attributes") area.Flags = std::stoul(cmd.actionParams.at(++i), nullptr, 0u);
-				else if (cmd.actionParams.at(i) == "nwCorner") {
-					std::transform(cmd.actionParams.begin() + ++i, cmd.actionParams.begin() + i + 3, area.nwCorner.begin(), [](std::string& s) -> float {
-						return std::stof(s);
-					});
-				}
-				else if (cmd.actionParams.at(i) == "seCorner") {
-					++i;
-					std::transform(cmd.actionParams.begin() + ++i, cmd.actionParams.begin() + i + 3, area.seCorner.begin(), [](std::string& s) -> float {
-						return std::stof(s);
-					});
-				}
-				else if (cmd.actionParams.at(i) == "NorthEastZ") area.NorthEastZ = std::stof(cmd.actionParams.at(++i));
-				else if (cmd.actionParams.at(i) == "SouthWestZ") area.SouthWestZ = std::stof(cmd.actionParams.at(++i));
-				else if (cmd.actionParams.at(i) == "PlaceID") area.PlaceID = std::clamp<ShortID>(std::stoul(cmd.actionParams.at(++i), nullptr, 0u), 0u, UINT16_MAX);
-
-				else if (cmd.actionParams.at(i) == "InheritVisibilityFromAreaID") area.InheritVisibilityFromAreaID = std::stoul(cmd.actionParams.at(++i), nullptr, 0u);
-				else if (cmd.actionParams.at(i) == "LightIntensity") 
-					std::transform(cmd.actionParams.begin() + ++i, cmd.actionParams.begin() + i + 4, area.LightIntensity.value().begin(), [](std::string& s) -> float {
-						return std::stof(s);
-					});
+			if (cmd.areaLocParam.value().first == true) {
+				areaIt->ID = cmd.areaLocParam.value().second;
+				// Can't allow for creating areas with duplicate IDs.
 			}
+			// It's an index. Just use the area count.
+			else areaIt->ID = ++inFile.GetAreaCount();
+			// Set blank coords.
+			areaIt->nwCorner = {0.0f, 0.0f, 0.0f};
+			areaIt->seCorner = {0.0f, 0.0f, 0.0f};
+			// Fill custom data.
+			areaIt->customDataSize = getCustomDataSize(inBuf, GetAsEngineVersion(inFile.GetMajorVersion(), inFile.GetMinorVersion()));
+			areaIt->customData.resize(areaIt->customDataSize, 0);
 			break;
+		// creating hide spot.
 		case TargetType::HIDE_SPOT:
 		{
 			// Error handling.
@@ -430,77 +435,420 @@ bool NavTool::ActionCreate(ToolCmd& cmd) {
 				std::filesystem::remove(TempPath);
 				return false;
 			}
-			if (std::clamp<unsigned char>(cmd.hideSpotID.value(), 0, area.hideSpotData.first) != cmd.hideSpotID.value()) {
+			// Clamp index.
+			if (std::clamp<unsigned char>(cmd.hideSpotID.value(), 0, areaIt->hideSpotData.first) != cmd.hideSpotID.value()) {
 				std::cerr << "Hide spot index parameter is out of range.\n";
 				std::filesystem::remove(TempPath);
 				return false;
 			}
 			// Create hide spot.
-			area.hideSpotData.second.emplace_back();
-			area.hideSpotData.first++;
-			// Edit data.
-			for (size_t i = 0; i < cmd.actionParams.size(); i++)
+			areaIt->hideSpotData.second.emplace_back();
+			areaIt->hideSpotData.first++;
+		}
+		// Create connection.
+		case TargetType::CONNECTION:
 			{
-				if (cmd.actionParams.at(i) == "id") area.hideSpotData.second.back().ID = std::stoi(cmd.actionParams.at(++i), nullptr, 0u);
-				else if (cmd.actionParams.at(i) == "position") {
-					++i;
-					std::transform(cmd.actionParams.begin() + i, cmd.actionParams.begin() + i + 3, area.hideSpotData.second.back().position.begin(), [](const std::string& s) -> float {
-						return std::stof(s);
-					});
+				if (!cmd.direc.has_value()) {
+					std::cerr << "fatal: Direction not defined.\n";
+					return false;
 				}
-				else if (cmd.actionParams.at(i) == "attributes") area.hideSpotData.second.back().Attributes = std::stoi(cmd.actionParams.at(++i), nullptr, 0u);
+				else if (!cmd.connectionIndex.has_value()) {
+					std::cerr << "fatal: Connection index not defined.\n";
+				}
+
+				// Make connection and increment connection count.
+				areaIt->connectionData.at((unsigned char)cmd.direc.value()).second.emplace_back();
+				areaIt->connectionData.at((unsigned char)cmd.direc.value()).first++;
 			}
+			break;
+		
+		// Create encounter path.
+		case TargetType::ENCOUNTER_PATH:
+		{
+			if (!cmd.encounterPathIndex.has_value()) {
+				std::cerr << "fatal: Encounter path index not set.\n";
+				return false;
+			}
+			if (!areaIt->encounterPaths.has_value()) {
+				std::clog << "Area has no encounter paths.\n";
+				return false;
+			}
+			areaIt->encounterPathCount++;
+			// Create encounter path.
+			areaIt->encounterPaths.value().emplace(areaIt->encounterPaths.value().begin() + cmd.encounterPathIndex.value());
+		}
+		break;
+		// Create encounter spot.
+		case TargetType::ENCOUNTER_SPOT:
+		{
+			if (!cmd.encounterSpotID.has_value()) {
+				std::clog << "fatal: Encounter spot index not set.\n";
+				return false;
+			}
+			else if (!cmd.encounterPathIndex.has_value()) {
+				std::clog << "fatal: Encounter path index not set.\n";
+				return false;
+			}
+			// Encounter path has to BE there.
+			if (areaIt->encounterPathCount < 1) {
+				std::clog << "There are no encounter paths\n";
+				return false;
+			}
+			NavEncounterPath& refEPath = areaIt->encounterPaths.value().at(cmd.encounterPathIndex.value());
+			// Increment counter.
+			refEPath.spotCount++;
+			refEPath.spotContainer.emplace(refEPath.spotContainer.begin() + cmd.encounterSpotID.value());
 		}
 		break;
 	}
 	
-	// Appending a new area.
-	if (cmd.target == TargetType::AREA) {
-		// Ensure the area will be properly written.
-		if (!area.WriteData(tmpfile, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
-			std::cerr << "fatal: Failed to write area data.\n";
-		}
-		// Increment area count.
-		++inFile.GetAreaCount();
-		inFile.areas.value().push_back(area);
-		inBuf.close();
-		if (!inBuf.open(inFile.GetFilePath(), std::ios_base::out | std::ios_base::binary)) {
-			std::cerr << "fatal: Could not open buffer.\n";
-			return false;
-		}
-		// Now write data.
-		inBuf.pubseekpos(0u, std::ios_base::out);
-		if (!inFile.WriteData(inBuf)) {
-			std::cerr << "fatal: Failed to write changed NAV data.\n";
-		}
-		std::cout << "Final Pos: " << inBuf.pubseekoff(0, std::ios_base::cur) << '\n';
+	// Ensure the data will be properly written and read.
+	if (!inFile.WriteData(tmpfile)) {
+		std::clog << "fatal: Failed to write NAV data to temp buffer.\n";
+		std::filesystem::remove(TempPath);
+		return false;
 	}
-	else {
-		inBuf.pubseekpos(areaLoc.value(), std::ios_base::in | std::ios_base::out);
-		// Ensure the area data will be properly written.
-		if (!area.WriteData(tmpfile, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
-			std::cerr << "Failed to write area data to temporary file!\n";
-			std::filesystem::remove(TempPath);
-			return false;
-		}
-		tmpfile.pubseekpos(0u, std::ios_base::in | std::ios_base::out);
-		if (!area.ReadData(tmpfile, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
-			std::cerr << "Failed to read area data to temporary file!\n";
-			std::filesystem::remove(TempPath);
-			return false;
-		}
-		// Clear. Write to inFile.
-		if (!area.WriteData(inBuf, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
-			std::cerr << "Failed to read area data to input file!\n";
-			std::filesystem::remove(TempPath);
-			return false;
-		}
+	tmpfile.pubseekpos(0u);
+	if (!inFile.ReadData(tmpfile)) {
+		std::clog << "fatal: Failed to read NAV data to temp buffer.\n";
+		std::filesystem::remove(TempPath);
+		return false;
+	}
+	inBuf.pubseekpos(0u);
+	// Clear. Write data to inFile.
+	if (!inFile.WriteData(inBuf)) {
+		std::clog << "Failed to write NAV data to input file!\n";
+		std::filesystem::remove(TempPath);
+		return false;
 	}
 	std::filesystem::remove(TempPath);
 	return true;
 }
 
 bool NavTool::ActionEdit(ToolCmd& cmd)
+{
+	// Check mappings to ensure they actually exist.
+	if (!std::all_of(cmd.actionParams.cbegin(), cmd.actionParams.cend(), [&file = inFile, &conf = programConfig](std::string_view view) -> bool {
+		// Ensure it is a number.
+		if (std::all_of(view.begin(), view.end(), [](unsigned char c) -> bool {
+				return std::isxdigit(c) || c == '.';
+			})) {
+			return true;
+		}
+		// or it exists as a toml value.
+		else if (conf["map"]["nav_version"][std::to_string(file.GetMajorVersion())] || conf["map"]) {	
+			if (conf["map"]["nav_version"][std::to_string(file.GetMajorVersion())][view] || conf["map"][view]) return true;
+			else {
+				std::clog << "Property alias not found. Exiting.\n";
+				return false;
+			}
+		}
+		else {
+			std::clog << "'map' table missing, but still attempted to parse string. Exiting\n";
+			return false;
+		}
+	})) {
+		return false;
+	}
+	
+	std::filesystem::file_status inFileStatus = std::filesystem::status(inFile.GetFilePath());
+	// No write permissions, so can't edit.
+	if (!(bool)(inFileStatus.permissions() & std::filesystem::perms::owner_write)) {
+		std::cerr << "Input file is read only.\n";
+		return false;
+	}
+	// Generate temporary file path.
+	std::filesystem::path TempPath = std::filesystem::temp_directory_path();
+	{
+		std::mt19937 mt_gen;
+		std::string tempFileName = std::to_string(mt_gen());
+		TempPath.append("nav/");
+		// Create directories
+		if (!std::filesystem::exists(TempPath)) std::filesystem::create_directories(TempPath);
+		TempPath.append(tempFileName);
+	}
+	// Setup temp file buffer.
+	std::filebuf tmpfile;
+	if (!tmpfile.open(TempPath, std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary)) {
+		std::cerr << "Could not create temporary file.\n";
+		return false;
+	}
+	// 
+	std::filebuf inBuf;
+	if (!inBuf.open(inFile.GetFilePath(), std::ios_base::in | std::ios_base::out | std::ios_base::binary)) {
+		std::cerr << "fatal: Failed to open buffer.\n";
+		std::filesystem::remove(TempPath);
+		return false;
+	}
+	
+	switch (cmd.target)
+	{
+	case TargetType::FILE:
+		{
+			// TODO:
+			return true;
+		}
+		break;
+	case TargetType::LADDER:
+		// TODO;
+		return true;
+		break;
+	default:
+		break;
+	}
+	// Area iterator.
+	auto areaIt = inFile.areas.value().end();
+	// Processing areas.
+	if (!cmd.areaLocParam.has_value()) {
+		std::cerr << "fatal: area index not defined.\n";
+		std::filesystem::remove(TempPath);
+		return false;
+	}
+	// Area locator parameter an ID. Need to verify the Area with the ID actually exists.
+	if (cmd.areaLocParam.value().first == true) {
+		// NavFile areas are sorted, so simply use that.
+		if (std::is_sorted(inFile.areas.value().begin(), inFile.areas.value().end(), [](const NavArea& lhs, const NavArea& rhs) {
+			return lhs.ID < rhs.ID;
+		})) {
+			if (std::clamp(cmd.areaLocParam.value().second, inFile.areas.value().front().ID, inFile.areas.value().back().ID) != cmd.areaLocParam.value().second) {
+				std::clog << "Area ID not found.\n";
+				return false;
+			}
+		}
+		else {
+			// Copy area IDs.
+			std::vector<IntID> AreaIDContainer;
+			std::transform(inFile.areas.value().begin(), inFile.areas.value().end(), AreaIDContainer.begin(), [](const NavArea& area) {
+				return area.ID;
+			});
+			// Sort the area IDs.
+			std::sort(AreaIDContainer.begin(), AreaIDContainer.end());
+			if (std::clamp(cmd.areaLocParam.value().second, inFile.areas.value().front().ID, inFile.areas.value().back().ID) != cmd.areaLocParam.value().second) {
+				std::clog << "Area ID not found.\n";
+				return false;
+			}
+		}
+		// Validated the area ID is within the area ID range. Search for it.
+		areaIt = std::find_if(inFile.areas.value().begin(), inFile.areas.value().end(), [&cmd](const NavArea& area) {
+				return cmd.areaLocParam.value().second == area.ID;
+			});
+	}
+	// Area locator parameter is an index. Simply set the iterator to the areas[index].
+	else
+	{
+		// Out of bounds.
+		if (std::clamp(cmd.areaLocParam.value().second, 0u, inFile.GetAreaCount()) != cmd.areaLocParam.value().second) {
+			std::cerr << "Specified area index is out of range.\n";
+			std::filesystem::remove(TempPath);
+			return false;
+		}
+		areaIt = inFile.areas.value().begin() + cmd.areaLocParam.value().second;
+	}
+	// Now we edit the target data.
+	switch (cmd.target) {
+		case TargetType::AREA:
+			{
+				std::stringstream dataBuf;
+				
+				// Get the properties from the arguments and set the area properties to those values.
+				for (size_t i = 0; i < cmd.actionParams.size();)
+				{
+					// 2 integer values.
+					if (std::all_of(cmd.actionParams.at(i).cbegin(), cmd.actionParams.at(i).cend(), isxdigit)) {
+						// Error checking.
+						if ((cmd.actionParams.begin() + i) >= cmd.actionParams.end())
+						{
+							std::clog << "Expected an integer.\n";
+							return false;
+						}
+						if (!std::all_of(cmd.actionParams.at(i + 1).cbegin(), cmd.actionParams.at(i + 1).cend(), isxdigit))
+						{
+							std::clog << "Value \'"<<cmd.actionParams.at(i + 1)<<"\' should be an integer.\n";
+							return false;
+						}
+						//
+						dataBuf.clear();
+						dataBuf.seekg(0u);
+						dataBuf.seekp(0u);
+						// Write data to buffer.
+						if (!areaIt->WriteData(*dataBuf.rdbuf(), inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
+							std::clog << "Failed to store area data. Exiting.\n";
+							return false;
+						}
+						// Make a change.
+						dataBuf.seekp(std::stoull(cmd.actionParams.at(i), nullptr, 0u));
+						unsigned char Val = std::stoi(cmd.actionParams.at(i + 1), nullptr, 0u);
+						dataBuf.put(Val);
+						// Read data from buffer.
+						if (!areaIt->ReadData(*dataBuf.rdbuf(), inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
+							std::clog << "Failed to get edited area data. Exiting.\n";
+							return false;
+						}
+						// Iterate.
+						i += 2;
+					}
+					// 
+					else if (programConfig["map"]["nav_version"][std::to_string(inFile.GetMajorVersion())][cmd.actionParams.at(i)]) {
+						const std::string propStr = programConfig["map"]["nav_version"][std::to_string(inFile.GetMajorVersion())][cmd.actionParams.at(i)].as_string()->value_exact<std::string>().value_or("");
+						size_t arg_count = strAreaEditMethodMap.at(propStr)(std::ref(*areaIt), cmd.actionParams.begin() + i + 1, cmd.actionParams.end());
+						// Fail.
+						if (arg_count == 0) {
+							return false;
+						}
+						else i += arg_count + 1;
+					}
+					// Is it a string? Try to parse it as a map to an area property.
+					else if (programConfig["map"][cmd.actionParams.at(i)]) {
+						const std::string propStr = programConfig["map"][cmd.actionParams.at(i)].as_string()->value_exact<std::string>().value_or("");
+						size_t arg_count = strAreaEditMethodMap.at(propStr)(std::ref(*areaIt), cmd.actionParams.begin() + i + 1, cmd.actionParams.end());
+						// Fail.
+						if (arg_count == 0) {
+							return false;
+						}
+						else i += arg_count + 1;
+					}
+					else
+					{
+						std::clog << "Invalid property. Exiting.\n";
+						return false;
+					}
+				}
+			}
+			break;
+		// Editing hide spot.
+		case TargetType::HIDE_SPOT:
+		{
+			// Error handling.
+			if (!cmd.hideSpotID.has_value()) {
+				std::cerr << "fatal: hide spot index not defined.\n";
+				std::filesystem::remove(TempPath);
+				return false;
+			}
+			if (std::clamp<unsigned char>(cmd.hideSpotID.value(), 0, areaIt->hideSpotData.first) != cmd.hideSpotID.value()) {
+				std::cerr << "Hide spot index parameter is out of range.\n";
+				std::filesystem::remove(TempPath);
+				return false;
+			}
+			std::stringstream dataBuf;
+			// New hide spot.
+			auto hSpotIt = areaIt->hideSpotData.second.begin() + cmd.hideSpotID.value();
+			for (size_t i = 0; i < cmd.actionParams.size(); i++)
+			{
+				// 2 integer values.
+				if (std::all_of(cmd.actionParams.at(i).cbegin(), cmd.actionParams.at(i).cend(), isxdigit)) {
+					// Error checking.
+					if ((cmd.actionParams.begin() + i) >= cmd.actionParams.end())
+					{
+						std::clog << "Expected an integer.\n";
+						return false;
+					}
+					if (!std::all_of(cmd.actionParams.at(i + 1).cbegin(), cmd.actionParams.at(i + 1).cend(), isxdigit))
+					{
+						std::clog << "Value \'"<<cmd.actionParams.at(i + 1)<<"\' should be an integer.\n";
+						return false;
+					}
+					//
+					dataBuf.clear();
+					dataBuf.seekg(0u);
+					dataBuf.seekp(0u);
+					// Write data to buffer.
+					if (!hSpotIt->WriteData(*dataBuf.rdbuf())) {
+						std::clog << "Failed to store area data. Exiting.\n";
+						return false;
+					}
+					// Make a change.
+					dataBuf.seekp(std::stoull(cmd.actionParams.at(i), nullptr, 0u));
+					unsigned char Val = std::stoi(cmd.actionParams.at(i + 1), nullptr, 0u);
+					dataBuf.put(Val);
+					// Read data from buffer.
+					if (!hSpotIt->ReadData(*dataBuf.rdbuf())) {
+						std::clog << "Failed to get edited area data. Exiting.\n";
+						return false;
+					}
+					// Iterate.
+					i += 2;
+				}
+				else if (programConfig["map"]["nav_version"][std::to_string(inFile.GetMajorVersion())][cmd.actionParams.at(i)]) {
+					const std::string propStr = programConfig["map"]["nav_version"][std::to_string(inFile.GetMajorVersion())][cmd.actionParams.at(i)].as_string()->value_exact<std::string>().value_or("");
+					size_t arg_count = strHideSpotEditMethodMap.at(propStr)(std::ref(*hSpotIt), cmd.actionParams.begin() + i + 1, cmd.actionParams.end());
+					// Fail.
+					if (arg_count == 0) {
+						return false;
+					}
+					else i += arg_count + 1;
+				}
+				// Is it a string? Try to parse it as an alias.
+				else if (programConfig["map"][cmd.actionParams.at(i)]) {
+					const std::string propStr = programConfig["map"][cmd.actionParams.at(i)].as_string()->value_exact<std::string>().value_or("");
+					size_t arg_count = strHideSpotEditMethodMap.at(propStr)(std::ref(*hSpotIt), cmd.actionParams.begin() + i + 1, cmd.actionParams.end());
+					// Fail.
+					if (arg_count == 0) {
+						return false;
+					}
+					else i += arg_count + 1;
+				}
+				else
+				{
+					std::clog << "Invalid property. Exiting.\n";
+					return false;
+				}
+			}
+		}
+		// Encounter path.
+		case TargetType::ENCOUNTER_PATH:
+			{
+				if (!cmd.encounterPathIndex.has_value()) {
+					std::clog << "Encounter path index is undefined." << std::endl;
+				}
+				auto ePathIt = areaIt->encounterPaths.value().begin() + cmd.encounterPathIndex.value();
+				for (size_t i = 0; i < cmd.actionParams.size(); i++)
+				{
+					if (std::all_of(cmd.actionParams.at(i).cbegin(), cmd.actionParams.at(i).cend(), isxdigit)) {
+						std::streampos position = std::stoull(cmd.actionParams.at(i), nullptr, 0u);
+					}
+				}
+			}
+			break;
+		case TargetType::ENCOUNTER_SPOT:
+			{
+				if (!cmd.encounterPathIndex.has_value())
+				{
+					std::clog << "Encounter path index is undefined." << std::endl;
+				}
+				auto eSpotIt = areaIt->encounterPaths.value().at(cmd.encounterPathIndex.value()).spotContainer.at(cmd.encounterSpotID.value());
+
+				// TODO:
+			}
+			break;
+		default:
+			std::clog << "Can't handle this type of data yet\n";
+			break;
+	}
+	// Ensure the NAV data will be properly written.
+	if (!inFile.WriteData(tmpfile)) {
+		std::clog << "Failed to write area data to temporary file!\n";
+		std::filesystem::remove(TempPath);
+		return false;
+	}
+	tmpfile.pubseekpos(0u, std::ios_base::in | std::ios_base::out);
+	if (!inFile.ReadData(tmpfile)) {
+		std::clog << "Failed to read area data to temporary file!\n";
+		std::filesystem::remove(TempPath);
+		return false;
+	}
+	// Clear. Write to inFile
+	inBuf.pubseekpos(0);
+	if (!inFile.WriteData(inBuf)) {
+		std::clog << "Failed to read area data to input file!\n";
+		std::filesystem::remove(TempPath);
+		return false;
+	}
+	std::filesystem::remove(TempPath);
+	return true;
+}
+
+
+bool NavTool::ActionDelete(ToolCmd& cmd)
 {
 	std::filesystem::file_status inFileStatus = std::filesystem::status(inFile.GetFilePath());
 	// Read only, can't edit.
@@ -549,81 +897,57 @@ bool NavTool::ActionEdit(ToolCmd& cmd)
 	default:
 		break;
 	}
-
-	inBuf.pubseekpos(inFile.GetAreaDataLoc());
+	// Iterator to specified area.
+	auto areaIt = inFile.areas.value().end();
 	// Processing areas.
 	if (!cmd.areaLocParam.has_value()) {
 		std::cerr << "fatal: area index not defined.\n";
 		std::filesystem::remove(TempPath);
 		return false;
 	}
-	std::optional<std::streampos> areaLoc;
-	// It's an ID.
+	// It's an ID. Do some checking to ensure we can reach it.
 	if (cmd.areaLocParam.value().first == true) 
-		areaLoc = inFile.FindArea(cmd.areaLocParam.value().second);
+		{
+			// Sort area container so that we can get the mins and maxes.
+			if (!std::is_sorted(inFile.areas.value().begin(), inFile.areas.value().end(), [](const NavArea& lhs, const NavArea& rhs) {return lhs.ID < rhs.ID;})) 
+				std::sort(inFile.areas.value().begin(), inFile.areas.value().end(), [](const NavArea& lhs, const NavArea& rhs) constexpr -> bool {
+				return lhs.ID < rhs.ID;
+			});
+			// Check if the ID is within the minmax ID range.
+			if (std::clamp(cmd.areaLocParam.value().second, inFile.areas.value().front().ID, inFile.areas.value().back().ID) != cmd.areaLocParam.value().second) {
+				std::cerr << "Requested ID is outside the found ID range #"<<std::to_string(inFile.areas.value().front().ID)<<" to #"<<std::to_string(inFile.areas.value().back().ID)<<".\n";
+				return false;
+			}
+			// Try find the area.
+			areaIt = std::find_if<std::vector<NavArea>::iterator >(inFile.areas.value().begin(), inFile.areas.value().end(), [&cmd](const NavArea& a) constexpr -> bool {
+				return cmd.areaLocParam.value().second == a.ID;
+			});
+		}
 	// It's an index
 	else
 	{
 		// Out of bounds.
-		if (std::clamp(cmd.areaLocParam.value().second, 0u, inFile.GetAreaCount()) != cmd.areaLocParam.value().second) {
+		unsigned int preClampValue = cmd.areaLocParam.value().second;
+		if (std::clamp<unsigned int>(cmd.areaLocParam.value().second, 0u, inFile.areas.value().size()) != preClampValue) {
 			std::cerr << "Specified area index is out of range.\n";
 			std::filesystem::remove(TempPath);
 			return false;
 		}
-		areaLoc = inFile.GetAreaDataLoc();
-		for (size_t i = 0; i < cmd.areaLocParam.value().second; i++)
-		{
-			auto areaSize = inFile.TraverseNavAreaData(areaLoc.value());
-			if (areaSize.has_value()) areaLoc.value() += areaSize.value();
-			else {
-				std::cerr << "fatal: Could not get area size!\n";
-				std::filesystem::remove(TempPath);
-				return false;
-			}
-		}
+		// Go to the area where the index points to.
+		areaIt = inFile.areas.value().begin() + cmd.areaLocParam.value().second;
 	}
-	
-	if (!areaLoc.has_value()) {
-		std::cerr << "fatal: Failed to get area position!\n";
+	// Did we find the specified area.
+	if (areaIt == inFile.areas.value().cend()) {
+		std::cerr << "Could not find area.\n";
 		return false;
 	}
-	// Got the area location. Now get data.
-	NavArea area;
-	inBuf.pubseekpos(areaLoc.value(), std::ios_base::in | std::ios_base::out);
-	if (!area.ReadData(inBuf, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
-		std::cerr << "fatal: Could not get area data.\n";
-		std::filesystem::remove(TempPath);
-		return false;
-	}
-	// Now we edit the target data.
+	// We got the area. 
+	// Now we delete the target data.
 	switch (cmd.target) {
 		case TargetType::AREA:
-			// Get the properties from the arguments and set the area properties to those values.
-			for (size_t i = 0; i < cmd.actionParams.size(); i++)
-			{
-				if (cmd.actionParams.at(i) == "id") area.ID = std::stoul(cmd.actionParams.at(++i), nullptr, 0u);
-				else if (cmd.actionParams.at(i) == "attributes") area.Flags = std::stoul(cmd.actionParams.at(++i), nullptr, 0u);
-				else if (cmd.actionParams.at(i) == "nwCorner") {
-					std::transform(cmd.actionParams.begin() + ++i, cmd.actionParams.begin() + i + 3, area.nwCorner.begin(), [](std::string& s) -> float {
-						return std::stof(s);
-					});
-				}
-				else if (cmd.actionParams.at(i) == "seCorner") {
-					++i;
-					std::transform(cmd.actionParams.begin() + ++i, cmd.actionParams.begin() + i + 3, area.seCorner.begin(), [](std::string& s) -> float {
-						return std::stof(s);
-					});
-				}
-				else if (cmd.actionParams.at(i) == "NorthEastZ") area.NorthEastZ = std::stof(cmd.actionParams.at(++i));
-				else if (cmd.actionParams.at(i) == "SouthWestZ") area.SouthWestZ = std::stof(cmd.actionParams.at(++i));
-				else if (cmd.actionParams.at(i) == "PlaceID") area.PlaceID = std::clamp<ShortID>(std::stoul(cmd.actionParams.at(++i), nullptr, 0u), 0u, UINT16_MAX);
-
-				else if (cmd.actionParams.at(i) == "InheritVisibilityFromAreaID") area.InheritVisibilityFromAreaID = std::stoul(cmd.actionParams.at(++i), nullptr, 0u);
-				else if (cmd.actionParams.at(i) == "LightIntensity") 
-					std::transform(cmd.actionParams.begin() + ++i, cmd.actionParams.begin() + i + 4, area.LightIntensity.value().begin(), [](std::string& s) -> float {
-						return std::stof(s);
-					});
-			}
+			// Delete area.
+			--inFile.GetAreaCount();
+			inFile.areas.value().erase(areaIt);
 			break;
 		case TargetType::HIDE_SPOT:
 		{
@@ -633,43 +957,50 @@ bool NavTool::ActionEdit(ToolCmd& cmd)
 				std::filesystem::remove(TempPath);
 				return false;
 			}
-			if (std::clamp<unsigned char>(cmd.hideSpotID.value(), 0, area.hideSpotData.first) != cmd.hideSpotID.value()) {
+			if (std::clamp<unsigned char>(cmd.hideSpotID.value(), 0, areaIt->hideSpotData.first) != cmd.hideSpotID.value()) {
 				std::cerr << "Hide spot index parameter is out of range.\n";
 				std::filesystem::remove(TempPath);
 				return false;
 			}
-			// Get hide spot.
-			NavHideSpot& hSpot = area.hideSpotData.second[cmd.hideSpotID.value()];
-			// Edit data.
-			for (size_t i = 0; i < cmd.actionParams.size(); i++)
-			{
-				if (cmd.actionParams.at(i) == "id") hSpot.ID = std::stoi(cmd.actionParams.at(++i), nullptr, 0u);
-				else if (cmd.actionParams.at(i) == "position") {
-					++i;
-					std::transform(cmd.actionParams.begin() + i, cmd.actionParams.begin() + i + 3, hSpot.position.begin(), [](const std::string& s) -> float {
-						return std::stof(s);
-					});
-				}
-				else if (cmd.actionParams.at(i) == "attributes") hSpot.Attributes = std::stoi(cmd.actionParams.at(++i), nullptr, 0u);
+			// Remove hide spot.
+			if (areaIt->hideSpotData.second.erase(areaIt->hideSpotData.second.begin() + cmd.hideSpotID.value()) == areaIt->hideSpotData.second.cend()) {
+				std::cerr << "fatal: Could not locate.\n";
 			}
+			areaIt->hideSpotData.first--;
 		}
+
+		case TargetType::CONNECTION:
+			if (!cmd.connectionIndex.has_value()) {
+				std::cerr << "fatal: connection index not defined.\n";
+				return false;
+			}
+			if (!cmd.direc.has_value())
+			{
+				std::cerr << "fatal: direction not defined.\n";
+				return false;
+			}
+			// Remove connection.
+			areaIt->connectionData[(unsigned char)cmd.direc.value()].second.erase(areaIt->connectionData[(unsigned char)cmd.direc.value()].second.begin() + cmd.connectionIndex.value());
+			areaIt->connectionData[(unsigned char)cmd.direc.value()].first--;
+			break;
+		default:
 		break;
 	}
-	inBuf.pubseekpos(areaLoc.value(), std::ios_base::in | std::ios_base::out);
-	// Ensure the area data will be properly written.
-	if (!area.WriteData(tmpfile, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
+	// Ensure the NAV data will be properly written.
+	if (!inFile.WriteData(tmpfile)) {
 		std::cerr << "Failed to write area data to temporary file!\n";
 		std::filesystem::remove(TempPath);
 		return false;
 	}
 	tmpfile.pubseekpos(0u, std::ios_base::in | std::ios_base::out);
-	if (!area.ReadData(tmpfile, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
+	if (!inFile.ReadData(tmpfile)) {
 		std::cerr << "Failed to read area data to temporary file!\n";
 		std::filesystem::remove(TempPath);
 		return false;
 	}
 	// Clear. Write to inFile.
-	if (!area.WriteData(inBuf, inFile.GetMajorVersion(), inFile.GetMinorVersion())) {
+	inBuf.pubseekpos(0u);
+	if (!inFile.WriteData(inBuf)) {
 		std::cerr << "Failed to read area data to input file!\n";
 		std::filesystem::remove(TempPath);
 		return false;
@@ -805,7 +1136,7 @@ bool NavTool::ActionInfo(ToolCmd& cmd)
 		case TargetType::CONNECTION:
 			{
 				// Error checking
-				if (!cmd.connectionID.has_value()) {
+				if (!cmd.connectionIndex.has_value()) {
 					std::cerr << "fatal: No connection ID set!\n";
 					return false;
 				}
@@ -817,14 +1148,14 @@ bool NavTool::ActionInfo(ToolCmd& cmd)
 					std::cerr << "fatal: Invalid direction set!\n";
 					return false;
 				}
-				if (targetArea.connectionData.at((char)cmd.direc.value()).first <= cmd.connectionID.value()) {
-					std::cout << "Connection #!"<< cmd.connectionID.value() << " is out of range\n";
+				if (targetArea.connectionData.at((char)cmd.direc.value()).first <= cmd.connectionIndex.value()) {
+					std::cout << "Connection #"<< cmd.connectionIndex.value() << " is out of range!\n";
 					return false;
 				}
 				// Read.
-				NavConnection& ref = targetArea.connectionData.at((unsigned char)cmd.direc.value()).second.at(cmd.connectionID.value());
+				NavConnection& ref = targetArea.connectionData.at((unsigned char)cmd.direc.value()).second.at(cmd.connectionIndex.value());
 				// Output
-				std::cout << directionToStr[cmd.direc.value()] << " connection #" << cmd.connectionID.value()
+				std::cout << directionToStr[cmd.direc.value()] << " connection #" << cmd.connectionIndex.value()
 				<< ":\n\tTarget Area ID: " << ref.TargetAreaID << '\n';
 			}
 			break;
@@ -840,12 +1171,12 @@ bool NavTool::ActionInfo(ToolCmd& cmd)
 				// Look for encounter path.
 				if (cmd.target == TargetType::ENCOUNTER_PATH)
 				{
-					if (targetArea.encounterPathCount <= cmd.encounterPathID.value()) {
+					if (targetArea.encounterPathCount <= cmd.encounterPathIndex.value()) {
 						std::cerr << "Requested encounter path is out of range.\n";
 						return false;
 					}
-					std::cout << "Encounter Path #" << cmd.encounterPathID.value() << " of area #" << targetArea.ID <<":\n";
-					targetArea.encounterPaths.value().at(cmd.encounterPathID.value()).Output(std::cout);
+					std::cout << "Encounter Path #" << cmd.encounterPathIndex.value() << " of area #" << targetArea.ID <<":\n";
+					targetArea.encounterPaths.value().at(cmd.encounterPathIndex.value()).Output(std::cout);
 					std::cout << '\n';
 				}
 				// Output encounter spot data.
@@ -854,22 +1185,49 @@ bool NavTool::ActionInfo(ToolCmd& cmd)
 						std::cerr << "FATAL: Encounter Spot ID not set!\n";
 						return false;
 					}
-					if (targetArea.encounterPathCount <= cmd.encounterPathID.value()) {
+					if (targetArea.encounterPathCount <= cmd.encounterPathIndex.value()) {
 						std::cerr << "The encounter path ID of the requested encounter spot is out of range.\n";
 						return false;
 					}
 					else {
-						if (targetArea.encounterPaths.value().at(cmd.encounterPathID.value()).spotCount <= cmd.encounterSpotID) {
-							std::cerr << "Requested Encounter Spot of Area #"<<targetArea.ID<<":Encounter Path #"<<cmd.encounterPathID.value()<<" is out of range.\n";
+						if (targetArea.encounterPaths.value().at(cmd.encounterPathIndex.value()).spotCount <= cmd.encounterSpotID) {
+							std::cerr << "Requested Encounter Spot of Area #"<<targetArea.ID<<":Encounter Path #"<<cmd.encounterPathIndex.value()<<" is out of range.\n";
 							return false;
 						}
-						std::cout << "Encounter Spot #" << cmd.encounterPathID.value() << " of area #" << targetArea.ID;
-						NavEncounterSpot& spotRef = targetArea.encounterPaths.value().at(cmd.encounterPathID.value()).spotContainer.at(cmd.encounterSpotID.value());
+						std::cout << "Encounter Spot #" << cmd.encounterPathIndex.value() << " of area #" << targetArea.ID;
+						NavEncounterSpot& spotRef = targetArea.encounterPaths.value().at(cmd.encounterPathIndex.value()).spotContainer.at(cmd.encounterSpotID.value());
 						std::cout << ":\n\tOrder ID: " << spotRef.OrderID
 						<< "\n\tParametric Distance: " << spotRef.ParametricDistance
 						<< '\n';
 					}
 				}
+			}
+			break;
+
+		case TargetType::APPROACH_SPOT:
+			{
+				// Check version.
+				if (inFile.GetMajorVersion() >= 15) {
+					std::cout << "This file is too new to contain approach spots.\n";
+					return false;
+				}
+				else if (!cmd.approachSpotIndex.has_value()) {
+					std::cerr << "fatal: approach spot ID not defined!\n";
+					return false;
+				}
+				if (!targetArea.approachSpotData.has_value()) {
+					std::cerr << "fatal: approach spot data not defined.\n";
+					return false;
+				}
+				NavApproachSpot& aSpotRef = targetArea.approachSpotData.value().at(cmd.approachSpotIndex.value());
+
+				// Output.
+				std::cout << "Approach Spot ["<<std::to_string(cmd.approachSpotIndex.value())
+				<<"]:\n\tApproach Type: " << std::to_string(aSpotRef.approachType)
+				<< "\n\tApproach Method:" << std::to_string(aSpotRef.approachHow)
+				<< "\n\tPrev ID: " << std::to_string(aSpotRef.approachPrevId)
+				<< "\n\tDestination: " << std::to_string(aSpotRef.approachHereId)
+				<< "\n\tNext ID: " << std::to_string(aSpotRef.approachNextId);
 			}
 			break;
 		case TargetType::LADDER:

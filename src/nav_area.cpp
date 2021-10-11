@@ -7,11 +7,11 @@
 #include "nav_base.hpp"
 
 NavArea::~NavArea() {
-	customData;
+	
 }
 
 // Outputs data of the nav area.
-void NavArea::OutputData(std::ostream& ostream) {
+void NavArea::OutputData(std::ostream& ostream) const {
 	ostream << "Area #" << std::to_string(ID) << ":\n\tAttribute Flag: 0x" << std::hex << Flags
 	<< "\n\tNorthWest corner vector: ";
 	for (size_t i = 0; i < nwCorner.size(); i++)

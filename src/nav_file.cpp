@@ -12,7 +12,6 @@ NavFile::NavFile() {}
 
 NavFile::NavFile(const std::filesystem::path& path)
 : FilePath(path) {
-
 }
 
 NavFile::~NavFile() {}
@@ -295,7 +294,7 @@ bool NavFile::ReadData(std::streambuf& buf) {
 	if (!areas.has_value()) areas = std::vector<NavArea>(AreaCount);
 	else {
 		areas.value().clear();
-		areas.value().reserve(AreaCount);
+		areas.value().resize(AreaCount);
 	}
 	// Store area data.
 	unsigned int index = 0u;
