@@ -69,5 +69,4 @@ class NavArea {
 
 	std::optional<bool> hasSameNAVData(const NavArea& rhs, const unsigned int& MajorVersion, const std::optional<unsigned int>& MinorVersion);
 };
-#define LADDER_SIZE 69 // Total size of ladder data.
 #endif

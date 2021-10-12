@@ -125,7 +125,7 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 	for (unsigned char currDirection = (char)Direction::North; currDirection < (char)Direction::Count; currDirection++)
 	{
 		if (buf.sgetn(reinterpret_cast<char*>(&connectionData[currDirection].first), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::ReadData(): Could not get direction " << (int)currDirection <<" connection data count!\n";
 			#endif
 			return false;
@@ -134,7 +134,7 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 		{
 			connectionData[currDirection].second.emplace_back();
 			if (!connectionData[currDirection].second.back().ReadData(buf)) {
-				#ifdef NDEBUG
+				#ifndef NDEBUG
 				std::cerr << "NavArea::ReadData(): Failed to read connection data for direction "<<std::to_string(currDirection)<<"!\n";
 				#endif
 				return false;
@@ -159,7 +159,7 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 	if (MajorVersion < 15) {
 		approachSpotCount = buf.sbumpc();
 		if (approachSpotCount == std::streambuf::traits_type::eof()) {
-			std::cerr << "NavArea::ReadData(): Could not read approach spot count!\n";
+			std::clog << "NavArea::ReadData(): Could not read approach spot count!\n";
 			return false;
 		}
 		if (approachSpotCount > 0 && !approachSpotData.has_value()) approachSpotData = std::vector<NavApproachSpot>();
@@ -167,8 +167,8 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 		{
 			approachSpotData.value().emplace_back();
 			if (!approachSpotData.value().back().ReadData(buf)) {
-				#ifdef NDEBUG
-				std::cerr << "NavArea::ReadData(): Failed to read approach spot data!\n";
+				#ifndef NDEBUG
+				std::clog << "NavArea::ReadData(): Failed to read approach spot data!\n";
 				#endif
 				return false;
 			}
@@ -177,22 +177,22 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 
 	// Encounter Paths.
 	if (buf.sgetn(reinterpret_cast<char*>(&encounterPathCount), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		std::cerr << "NavArea::ReadData(): Could not get encounter path count!\n";
+		std::clog << "NavArea::ReadData(): Could not get encounter path count!\n";
 		return false;
 	}
 	if (encounterPathCount > 0 && !encounterPaths.has_value()) encounterPaths = std::deque<NavEncounterPath>(encounterPathCount);
 	for (unsigned int pathIndex=0; pathIndex < encounterPathCount; pathIndex++) {
 		if (!encounterPaths.value().at(pathIndex).ReadData(buf)) {
-			#ifdef NDEBUG
-			std::cerr << "NavArea::ReadData(): Could not read encounter path data!\n";
+			#ifndef NDEBUG
+			std::clog << "NavArea::ReadData(): Could not read encounter path data!\n";
 			#endif
 			return false;
 		}
 	}
 	// Read place ID.
 	if (buf.sgetn(reinterpret_cast<char*>(&PlaceID), VALVE_SHORT_SIZE) != VALVE_SHORT_SIZE) {
-		#ifdef NDEBUG
-		std::cerr << "NavArea::ReadData(): Could not get place ID!\n";
+		#ifndef NDEBUG
+		std::clog << "NavArea::ReadData(): Could not get place ID!\n";
 		#endif
 		return false;
 	}
@@ -200,16 +200,16 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 	for (char i = 0; i < 2; i++)
 	{
 		if (buf.sgetn(reinterpret_cast<char*>(&ladderData[i].first), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::ReadData(): Could not get ladder data count (for direction " << i << ")!\n";
 			#endif
 			return false;
 		}
-		for (size_t i = 0; i < ladderData[i].first; i++)
+		for (size_t it = 0; it < ladderData[i].first; it++)
 		{
 			IntID id;
 			if (buf.sgetn(reinterpret_cast<char*>(&id), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-				std::cerr << "NavArea::ReadData(): Could not read ladder ID!\n";
+				std::clog << "NavArea::ReadData(): Could not read ladder ID!\n";
 				return false;
 			}
 			ladderData[i].second.push_back(id);
@@ -230,7 +230,7 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 		for (size_t i = 0; i < (char)Direction::Count; i++)
 		{
 			if (buf.sgetn(reinterpret_cast<char*>(LightIntensity.value().data() + i), VALVE_FLOAT_SIZE) != VALVE_FLOAT_SIZE) {
-				#ifdef NDEBUG
+				#ifndef NDEBUG
 				std::cerr << "NavArea::ReadData(): Could not read light intensity for corner["<<i<<"]!\n";
 				#endif
 				return false;
@@ -247,38 +247,37 @@ bool NavArea::ReadData(std::streambuf& buf, const unsigned int& MajorVersion, co
 			}
 			visAreaCount = tmp;
 		}
-		if (visAreaCount.value() > 0) 
+		if (visAreaCount.value() > 0){
 			visAreas.emplace(std::vector<NavVisibleArea>(visAreaCount.value()));
-		for (size_t i = 0; i < visAreaCount; i++)
-		{
-			if (!visAreas.value().at(i).ReadData(buf)) {
-				#ifdef NDEBUG
-				std::cerr << "NavArea::ReadData(): Could not read visArea data!\n";
-				#endif
-				return false;
+			for (size_t i = 0; i < visAreaCount; i++)
+			{
+				if (!visAreas.value().at(i).ReadData(buf)) {
+					#ifndef NDEBUG
+					std::clog << "NavArea::ReadData(): Could not read visArea data!\n";
+					#endif
+					return false;
+				}
 			}
 		}
-	}
-	// Get InheritVisibilityFromAreaID.
-	if (buf.sgetn(reinterpret_cast<char*>(&InheritVisibilityFromAreaID), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		std::cerr << "NavArea::ReadData(): Could not read InheritVisibilityFromAreaID!\n";
-		return false;
-	}
-	// Create custom game data IF the custom data is there.
-	if (buf.in_avail() > 0) {
-		std::streampos customDataPos = buf.pubseekoff(0, std::ios_base::cur, std::ios_base::in);
-		customDataSize = getCustomDataSize(buf, GetAsEngineVersion(MajorVersion, {}));
-		buf.pubseekpos(customDataPos, std::ios_base::in);
-		// Make room for custom data.
-		customData.clear();
-		customData.resize(customDataSize);
-		// Read custom data.
-		if (buf.sgetn(reinterpret_cast<char*>(customData.data()), customDataSize) != customDataSize) {
-			#ifdef NDEBUG
-			std::cerr << "NavArea::ReadData(): Could not read custom data!\n";
-			#endif
+		// Get InheritVisibilityFromAreaID.
+		if (buf.sgetn(reinterpret_cast<char*>(&InheritVisibilityFromAreaID), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
+			std::clog << "NavArea::ReadData(): Could not read InheritVisibilityFromAreaID!\n";
 			return false;
 		}
+	}
+	// Create custom game data.
+	std::streampos customDataPos = buf.pubseekoff(0, std::ios_base::cur, std::ios_base::in);
+	customDataSize = getCustomDataSize(buf, MajorVersion, MinorVersion);
+	buf.pubseekpos(customDataPos, std::ios_base::in);
+	// Make room for custom data.
+	customData.clear();
+	customData.resize(customDataSize);
+	// Read custom data.
+	if (buf.sgetn(reinterpret_cast<char*>(customData.data()), customDataSize) != customDataSize) {
+		#ifndef NDEBUG
+		std::clog << "NavArea::ReadData(): Could not read custom data!\n";
+		#endif
+		return false;
 	}
 	// Set area size
 	size = buf.pubseekoff(0, std::ios_base::cur) - startPos;
@@ -295,7 +294,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	if (MajorVersion < 8) {
 		unsigned char tmp = Flags;
 		if (out.sputc(Flags) == std::streambuf::traits_type::eof()) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::WriteData(): Failed to write 8-bit attribute flag!\n";
 			#endif
 			return false;
@@ -304,14 +303,14 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	else if (MajorVersion <= 13) {
 		unsigned short tmp = Flags;
 		if (out.sputn(reinterpret_cast<char*>(&tmp), VALVE_SHORT_SIZE) != VALVE_SHORT_SIZE) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::WriteData(): Failed to write 16-bit attribute flag!\n";
 			#endif
 			return false;
 		}
 	}
 	else if (out.sputn(reinterpret_cast<char*>(&Flags), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 		std::cerr << "NavArea::WriteData(): Failed to write 32-bit attribute flag!\n";
 		#endif
 		return false;
@@ -321,7 +320,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	for (size_t i = 0; i < nwCorner.size(); i++)
 	{
 		if (out.sputn(reinterpret_cast<char*>(nwCorner.data() + i), VALVE_FLOAT_SIZE) != VALVE_FLOAT_SIZE) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::WriteData(): Failed to write nwCorner["<<i<<"]!\n";
 			#endif
 			return false;
@@ -331,7 +330,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	for (size_t i = 0; i < seCorner.size(); i++)
 	{
 		if (out.sputn(reinterpret_cast<char*>(seCorner.data() + i), VALVE_FLOAT_SIZE) != VALVE_FLOAT_SIZE) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::WriteData(): Failed to write seCorner["<<i<<"]!\n";
 			#endif
 			return false;
@@ -341,7 +340,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	// Write NorthEastZ…
 	float tmp = NorthEastZ.value_or(0.0f);
 	if (out.sputn(reinterpret_cast<char*>(&tmp), VALVE_FLOAT_SIZE) != VALVE_FLOAT_SIZE) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 		std::cerr << "NavArea::WriteData(): Failed to write NorthEast Z height!\n";
 		#endif
 		return false;
@@ -349,7 +348,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	// …and SouthWestZ.
 	tmp = SouthWestZ.value_or(0.0f);
 	if (out.sputn(reinterpret_cast<char*>(&tmp), VALVE_FLOAT_SIZE) != VALVE_FLOAT_SIZE) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 		std::cerr << "NavArea::WriteData(): Failed to write SouthWest Z height!\n";
 		#endif
 		return false;
@@ -359,7 +358,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	for (unsigned char currDirection = (char)Direction::North; currDirection < (char)Direction::Count; currDirection++)
 	{
 		if (out.sputn(reinterpret_cast<char*>(&connectionData[currDirection].first), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::WriteData(): Failed to write conneciton count for direction "<<currDirection<<"!\n";
 			#endif
 			return false;
@@ -367,7 +366,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 		for (size_t i = 0; i < connectionData[currDirection].first; i++)
 		{
 			if (!connectionData[currDirection].second[i].WriteData(out)) {
-				#ifdef NDEBUG
+				#ifndef NDEBUG
 				std::cerr << "NavArea::WriteData(): Failed to write connection data!\n";
 				#endif
 				return false;
@@ -376,7 +375,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	}
 	// Hiding spots
 	if (out.sputc(hideSpotData.first) == std::streambuf::traits_type::eof()) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 		std::cerr << "NavArea::WriteData(): Failed to write hide spot count!\n";
 		#endif
 		return false;
@@ -384,7 +383,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	for (size_t i = 0; i < hideSpotData.first; i++)
 	{
 		if (!hideSpotData.second[i].WriteData(out)) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::WriteData(): Failed to write hide spot data!\n";
 			#endif
 			return false;
@@ -393,7 +392,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	// Approach spots are not in newer NAV versions.
 	if (MajorVersion < 15) {
 		if (out.sputc(approachSpotCount) == EOF) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::WriteData(): Failed to write approach spot count!\n";
 			#endif
 			return false;
@@ -401,7 +400,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 		if (approachSpotData.has_value()) for (size_t i = 0; i < approachSpotCount; i++)
 		{
 			if (!approachSpotData.value()[i].WriteData(out)) {
-				#ifdef NDEBUG
+				#ifndef NDEBUG
 				std::cerr << "NavArea::WriteData(): Failed to write approach spot data!\n";
 				#endif
 				return false;
@@ -411,7 +410,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 		{
 			NavApproachSpot sp;
 			if (!sp.WriteData(out)) {
-				#ifdef NDEBUG
+				#ifndef NDEBUG
 				std::cerr << "NavArea::WriteData(): Failed to write blank approach spot data!\n";
 				#endif
 				return false;
@@ -420,7 +419,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	}
 	// Encounter Paths.
 	if (out.sputn(reinterpret_cast<char*>(&encounterPathCount), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 		std::cerr << "NavArea::WriteData(): Failed to write encounter path count!\n";
 		#endif
 		return false;
@@ -428,7 +427,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	if (encounterPaths.has_value()) for (size_t i = 0; i < encounterPathCount; i++)
 	{
 		if (!encounterPaths.value()[i].WriteData(out)) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::WriteData(): Failed to write encounter path data!\n";
 			#endif
 			return false;
@@ -437,7 +436,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 
 	// Write place ID.
 	if (out.sputn(reinterpret_cast<char*>(&PlaceID), VALVE_SHORT_SIZE) != VALVE_SHORT_SIZE) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 		std::cerr << "NavArea::WriteData(): Failed to write place ID!\n";
 		#endif
 		return false;
@@ -447,7 +446,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	{
 		// Ladder count
 		if (out.sputn(reinterpret_cast<char*>(&ladderData[i].first), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::WriteData(): Failed to write (direction "<<i<<") ladder count!\n";
 			#endif
 			return false;
@@ -456,7 +455,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 		if (ladderData[i].first > 0u) for (auto& ladderID : ladderData[i].second)
 		{
 			if (out.sputn(reinterpret_cast<char*>(&ladderID), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-				#ifdef NDEBUG
+				#ifndef NDEBUG
 				std::cerr << "NavArea::WriteData(): Failed to write (direction "<<i<<") ladder data!\n";
 				#endif
 				return false;
@@ -466,7 +465,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 	// Occupy times
 	for (size_t i = 0u; i < EarliestOccupationTimes.size(); i++) 
 		if (out.sputn(reinterpret_cast<char*>(EarliestOccupationTimes.data() + i), VALVE_FLOAT_SIZE) != VALVE_FLOAT_SIZE) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::WriteData(): Failed to write occupation time for team "<<i<<" data!\n";
 			#endif
 			return false;
@@ -478,7 +477,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 		if (LightIntensity.has_value()) for (size_t i = 0; i < (char)Direction::Count; i++)
 		{
 			if (out.sputn(reinterpret_cast<char*>(LightIntensity.value().data() + i), VALVE_FLOAT_SIZE) != VALVE_FLOAT_SIZE) {
-				#ifdef NDEBUG
+				#ifndef NDEBUG
 				std::cerr << "NavArea::WriteData(): Failed to write light intensity for direction "<<i<<"!\n";
 				#endif
 				return false;
@@ -486,7 +485,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 		}
 		// No LightIntensities recorded.
 		else if (out.sputn(reinterpret_cast<char*>(nullval), VALVE_FLOAT_SIZE * 4) != VALVE_FLOAT_SIZE * 4) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavArea::WriteData(): Failed to write blank light intensities!\n";
 			#endif
 			return false;

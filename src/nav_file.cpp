@@ -4,7 +4,7 @@
 #include <exception>
 #include <bit>
 #include <unistd.h>
-#include <span>
+#include <functional>
 #include "nav_file.hpp"
 #include "nav_area.hpp"
 
@@ -69,14 +69,14 @@ Returns true on success, false on failure. */
 bool NavFile::WriteData(std::streambuf& buf) {
 	// Write header.
 	if (buf.sputn(reinterpret_cast<char*>(&MagicNumber), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 		std::cerr << "NavFile::WriteData(): failed to write magic number.\n";
 		#endif
 		return false;
 	}
 	// Write major version.
 	if (buf.sputn(reinterpret_cast<char*>(&MajorVersion), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 		std::cerr << "NavFile::WriteData(): failed to write major version.\n";
 		#endif
 		return false;
@@ -85,7 +85,7 @@ bool NavFile::WriteData(std::streambuf& buf) {
 	{
 		unsigned int tmp = MinorVersion.value_or(0u);
 		if (MajorVersion >= 10 && buf.sputn(reinterpret_cast<char*>(&tmp), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavFile::WriteData(): failed to write minor version.\n";
 			#endif
 			return false;
@@ -94,7 +94,7 @@ bool NavFile::WriteData(std::streambuf& buf) {
 		// Write BSPSize if major version is ≥4.
 		tmp = BSPSize.value_or(0u);
 		if (MajorVersion >= 4 && buf.sputn(reinterpret_cast<char*>(&tmp), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavFile::WriteData(): failed to write BSP size.\n";
 			#endif
 			return false;
@@ -104,7 +104,7 @@ bool NavFile::WriteData(std::streambuf& buf) {
 	{
 		bool tmp = isAnalyzed.value_or(false);
 		if (MajorVersion >= 4 && buf.sputc(tmp) == EOF) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavFile::WriteData(): failed to write analyzed boolean.\n";
 			#endif
 			return false;
@@ -114,7 +114,7 @@ bool NavFile::WriteData(std::streambuf& buf) {
 	// Write place count.
 	if (MajorVersion >= 5)  {
 		if (buf.sputn(reinterpret_cast<char*>(&PlaceCount), VALVE_SHORT_SIZE) != VALVE_SHORT_SIZE) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavFile::WriteData(): failed to write place count.\n";
 			#endif
 			return false;
@@ -125,20 +125,20 @@ bool NavFile::WriteData(std::streambuf& buf) {
 			if (!std::all_of(PlaceNames.begin(), PlaceNames.end(), [&buf](std::string& placeName) -> bool {
 				unsigned short placeNameLength = std::clamp<unsigned short>(placeName.length(), 0u, UINT16_MAX);
 				if (buf.sputn(reinterpret_cast<char*>(&placeNameLength), VALVE_SHORT_SIZE) != VALVE_SHORT_SIZE) {
-					#ifdef NDEBUG
+					#ifndef NDEBUG
 					std::cerr << "NavFile::WriteData(): failed to write place name length.\n";
 					#endif
 					return false;
 				}
 				if (buf.sputn(placeName.data(), placeNameLength) != placeNameLength) {
-					#ifdef NDEBUG
+					#ifndef NDEBUG
 					std::cerr << "NavFile::WriteData(): failed to write place name.\n";
 					#endif
 					return false;
 				}
 				return true;
 			})) {
-				#ifdef NDEBUG
+				#ifndef NDEBUG
 				std::cerr << "NavFile::WriteData(): failed to write place data.\n";
 				#endif
 				return false;
@@ -147,7 +147,7 @@ bool NavFile::WriteData(std::streambuf& buf) {
 
 		// Has unnamed areas?
 		if (MajorVersion > 11 && buf.sputc(hasUnnamedAreas.value_or(false)) == EOF) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavFile::WriteData(): Could not write 'unnamed areas exist' boolean.\n";
 			#endif
 			return false;
@@ -156,7 +156,7 @@ bool NavFile::WriteData(std::streambuf& buf) {
 	
 	// Write area count.
 	if (buf.sputn(reinterpret_cast<char*>(&AreaCount), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 		std::cerr << "NavFile::WriteData(): Could not write area count.\n";
 		#endif
 		return false;
@@ -172,7 +172,7 @@ bool NavFile::WriteData(std::streambuf& buf) {
 				return true;
 			}
 			else {
-				#ifdef NDEBUG
+				#ifndef NDEBUG
 				std::cerr << "NavFile::WriteData(): Failed to write area data.\n";
 				#endif
 				return false;
@@ -183,12 +183,22 @@ bool NavFile::WriteData(std::streambuf& buf) {
 	
 	// Write ladder count
 	if (buf.sputn(reinterpret_cast<char*>(&LadderCount), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		#ifdef NDEBUG
-		std::cerr << "NavFile::WriteData(): Could not write area count.\n";
+		#ifndef NDEBUG
+		std::clog << "NavFile::WriteData(): Could not write area count.\n";
 		#endif
 		return false;
 	}
 	LadderDataLoc = buf.pubseekoff(0, std::ios_base::cur);
+	for (auto& ladder : ladders)
+	{
+		if (!ladder.WriteData(buf))
+		{
+			#ifndef NDEBUG
+			std::clog << "NavFile::WriteData(): Could not write ladder data.\n";
+			#endif
+			return false;
+		}
+	}
 	return true;
 }
 /* Read header info.
@@ -196,14 +206,14 @@ Returns true on success, false on failure. */
 bool NavFile::ReadData(std::streambuf& buf) {
 	// Read header.
 	if (buf.sgetn(reinterpret_cast<char*>(&MagicNumber), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 		std::cerr << "NavFile::ReadData(): failed to write magic number.\n";
 		#endif
 		return false;
 	}
 	// Read major version.
 	if (buf.sgetn(reinterpret_cast<char*>(&MajorVersion), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 		std::cerr << "NavFile::ReadData(): failed to write major version.\n";
 		#endif
 		return false;
@@ -213,7 +223,7 @@ bool NavFile::ReadData(std::streambuf& buf) {
 		unsigned int tmp;
 		if (MajorVersion >= 10) {
 			if (buf.sgetn(reinterpret_cast<char*>(&tmp), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-				#ifdef NDEBUG
+				#ifndef NDEBUG
 				std::cerr << "NavFile::ReadData(): failed to write minor version.\n";
 				#endif
 				return false;
@@ -224,7 +234,7 @@ bool NavFile::ReadData(std::streambuf& buf) {
 		// Read BSPSize if major version is ≥4.
 		if (MajorVersion >= 4) {
 			if (buf.sgetn(reinterpret_cast<char*>(&tmp), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-				#ifdef NDEBUG
+				#ifndef NDEBUG
 				std::cerr << "NavFile::ReadData(): failed to write BSP size.\n";
 				#endif
 				return false;
@@ -235,7 +245,7 @@ bool NavFile::ReadData(std::streambuf& buf) {
 	// Read analyzed boolean if major version is ≥14.
 	{
 		if (MajorVersion >= 4 && (isAnalyzed = buf.sbumpc()) == EOF) {
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavFile::ReadData(): failed to read analyzed boolean.\n";
 			#endif
 			return false;
@@ -245,25 +255,28 @@ bool NavFile::ReadData(std::streambuf& buf) {
 	// Read place count.
 	if (MajorVersion >= 5)  {
 		if (buf.sgetn(reinterpret_cast<char*>(&PlaceCount), VALVE_SHORT_SIZE) != VALVE_SHORT_SIZE) {
-			#ifdef NDEBUG
-			std::cerr << "NavFile::ReadData(): failed to read place count.\n";
+			#ifndef NDEBUG
+			std::clog << "NavFile::ReadData(): failed to read place count.\n";
 			#endif
 			return false;
 		}
 
+		// Prepare place deque.
+		PlaceNames.resize(PlaceCount);
 		// Read place data.
 		for (unsigned int i = 0u; i < PlaceCount; i++) {
 			unsigned short placeNameLength;
 			if (buf.sgetn(reinterpret_cast<char*>(&placeNameLength), VALVE_SHORT_SIZE) != VALVE_SHORT_SIZE) {
-				#ifdef NDEBUG
-				std::cerr << "NavFile::ReadData(): failed to read place name length.\n";
+				#ifndef NDEBUG
+				std::clog << "NavFile::ReadData(): failed to read place name length.\n";
 				#endif
 				return false;
 			}
-			char* placeNameBuf;
-			if (buf.sgetn(placeNameBuf, placeNameLength) != placeNameLength) {
-				#ifdef NDEBUG
-				std::cerr << "NavFile::ReadData(): failed to read place name.\n";
+			//std::vector<char> placeNameBuf[256];
+			PlaceNames.at(i).resize(placeNameLength);
+			if (buf.sgetn(PlaceNames.at(i).data(), placeNameLength) != placeNameLength) {
+				#ifndef NDEBUG
+				std::clog << "NavFile::ReadData(): failed to read place name.\n";
 				#endif
 				return false;
 			}
@@ -273,18 +286,21 @@ bool NavFile::ReadData(std::streambuf& buf) {
 		if (MajorVersion > 11) {
 			hasUnnamedAreas = buf.sbumpc();
 			if (hasUnnamedAreas == EOF) {
-				#ifdef NDEBUG
-				std::cerr << "NavFile::ReadData(): Could not read 'unnamed areas exist' boolean.\n";
+				#ifndef NDEBUG
+				std::clog << "NavFile::ReadData(): Could not read 'unnamed areas exist' boolean.\n";
 				#endif
 				return false;
 			}
 		}
 	}
-
+	/*
+		NOTE: Left 4 Dead and some games load custom data here.
+		Not really sure how to implement the reading though, so just assume that there's no custom data here for now.
+	*/
 	// Read area count.
 	if (buf.sgetn(reinterpret_cast<char*>(&AreaCount), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		#ifdef NDEBUG
-		std::cerr << "NavFile::ReadData(): Could not read area count.\n";
+		#ifndef NDEBUG
+		std::clog << "NavFile::ReadData(): Could not read area count.\n";
 		#endif
 		return false;
 	}
@@ -299,13 +315,15 @@ bool NavFile::ReadData(std::streambuf& buf) {
 	// Store area data.
 	unsigned int index = 0u;
 	if (!std::all_of(areas.value().begin(), areas.value().end(), [&buf, &majV = MajorVersion, &minV = MinorVersion, &index](NavArea& area) mutable {
+		std::cout << "Prefile Pos: "<<buf.pubseekoff(0, std::ios_base::cur)<<"\n";
 		if (area.ReadData(buf, majV, minV)) {
 			index++;
+			std::cout << "File Pos: "<<buf.pubseekoff(0, std::ios_base::cur)<<"\n";
 			return true;
 		}
 		else {
-			#ifdef NDEBUG
-			std::cerr << "NavFile::ReadData(index "<<std::to_string(index)<<"): failed to read area data.\n";
+			#ifndef NDEBUG
+			std::clog << "NavFile::ReadData(index "<<std::to_string(index)<<"): failed to read area data.\n";
 			#endif
 			return false;
 		}
@@ -316,11 +334,25 @@ bool NavFile::ReadData(std::streambuf& buf) {
 
 	// Read ladder count.
 	if (buf.sgetn(reinterpret_cast<char*>(&LadderCount), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
-		#ifdef NDEBUG
-		std::cerr << "NavFile::ReadData(): Could not read ladder count.\n";
+		#ifndef NDEBUG
+		std::clog << "NavFile::ReadData(): Could not read ladder count.\n";
 		#endif
 		return false;
 	}
+	// Store ladder data.
+	ladders.clear();
+	ladders.resize(LadderCount);
+	for (auto& ladder : ladders)
+	{
+		if (!ladder.ReadData(buf)) {
+			#ifndef NDEBUG
+			std::clog << "NavFile::ReadData(): Could not read ladder data.\n";
+			#endif
+			return false;
+		}
+	}
+	
+	// Assume that remaining data left is custom data.
 	// Done
 	return true;
 }
@@ -340,7 +372,7 @@ std::optional<size_t> NavFile::TraverseNavAreaData(const std::streampos& pos) {
 	std::filebuf inFileBuf;
 	inFileBuf.open(FilePath, std::ios_base::in | std::ios_base::binary);
 	if (!inFileBuf.is_open()) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 			std::cerr << "NavFile::TraverseNavAreaData(): File buffer \'" << FilePath << "\' could not open.\n";
 		#endif
 		return {};
@@ -351,7 +383,7 @@ std::optional<size_t> NavFile::TraverseNavAreaData(const std::streampos& pos) {
 		std::optional<unsigned char> size = getAreaAttributeFlagSize(MajorVersion, MinorVersion);
 		if (!size.has_value())
 		{
-			#ifdef NDEBUG
+			#ifndef NDEBUG
 			std::cerr << "NavFile::TraverseNavAreaData(): Could not get attribute flag size!\n";
 			#endif
 			return {};
@@ -412,7 +444,7 @@ std::optional<size_t> NavFile::TraverseNavAreaData(const std::streampos& pos) {
 	if (!inFileBuf.pubseekoff(VALVE_INT_SIZE, std::ios_base::cur)) return {};
 
 	// Skip over custom data.
-	if (!inFileBuf.pubseekoff(getCustomDataSize(inFileBuf, GetAsEngineVersion(MajorVersion, MinorVersion)), std::ios_base::cur)) return {};
+	if (!inFileBuf.pubseekoff(getCustomDataSize(inFileBuf, MajorVersion, MinorVersion), std::ios_base::cur)) return {};
 
 	return (inFileBuf.pubseekoff(0, std::ios_base::cur) - startPos);
 }
@@ -424,7 +456,7 @@ std::optional<std::streampos> NavFile::FindArea(const unsigned int& ID) {
 	std::filebuf inFileBuf;
 	inFileBuf.open(FilePath, std::ios_base::in | std::ios_base::binary);
 	if (!inFileBuf.is_open()) {
-		#ifdef NDEBUG
+		#ifndef NDEBUG
 			std::cerr << "Failed to open file buffer \'" << FilePath << "\'!\n";
 		#endif
 		return {};

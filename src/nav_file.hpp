@@ -5,6 +5,7 @@
 #include <deque>
 #include <filesystem>
 #include <span>
+#include "nav_base.hpp"
 #include "nav_place.hpp"
 #include "nav_area.hpp"
 class NavFile {
@@ -22,7 +23,8 @@ class NavFile {
 		std::streampos LadderDataLoc = -1; // Ladder Data location.
 		std::deque<std::string> PlaceNames;
 	public:
-		std::optional<std::vector<NavArea> > areas;
+		std::optional<std::vector<NavArea> > areas; // Area container.
+		std::deque<NavLadder> ladders;
 		NavFile();
 		NavFile(const std::filesystem::path& path);
 		~NavFile();

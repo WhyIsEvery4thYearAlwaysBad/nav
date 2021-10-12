@@ -13,8 +13,6 @@
 #define VALVE_FLOAT_SIZE 4
 #define LATEST_NAV_MAJOR_VERSION 16 // The latest NAV major version used. (Team Fortress 2)
 
-#define NDEBUG
-
 // An ID in NAVs is usually represented as 32-bit, 16-bit, or 8-bit
 typedef unsigned int IntID;
 typedef unsigned short ShortID;
@@ -47,8 +45,10 @@ enum EngineVersion {
 
 // Get the Enginer Version from NAV versions.
 EngineVersion GetAsEngineVersion(const unsigned int& MajorVersion, const std::optional<unsigned int>& MinorVersion);
+// get the minimum custom data length (in bytes) possible
+std::size_t getCustomDataSize(const unsigned int& version, const std::optional<unsigned int>& subversion);
 // get the custom data length (in bytes) from a NAV file.
-std::size_t getCustomDataSize(std::streambuf& buf, const EngineVersion& version);
+std::size_t getCustomDataSize(std::streambuf& buf, const unsigned int& version, const std::optional<unsigned int>& subversion);
 // Get the ideal attribute flag size (in bytes) of an area.
 std::optional<unsigned char> getAreaAttributeFlagSize(const unsigned int& MajorVersion, const std::optional<unsigned int>& MinorVersion);
 
@@ -128,6 +128,26 @@ public:
 	bool ReadData(std::streambuf& in);
 
 	bool hasSameNAVData(const NavVisibleArea& rhs) const;
+};
+
+#define LADDER_SIZE 53 // Total size of ladder data.
+// Ladder
+class NavLadder {
+public:
+	unsigned int ID; // The ID of the ladder
+	float Width; // The width of the ladder
+	float Length; // The length of the ladder
+	std::array<float, 3> TopVec; // The location of the center of the top of the ladder
+	std::array<float, 3> BottomVec; // The location of the center of the bottom of the ladder
+	unsigned int direction; // The direction of the ladder.
+	unsigned int TopForwardAreaID; // ID of the area connected to the top-forward position of the ladder
+	unsigned int TopLeftAreaID; // ID of the area connected to the top-left position of the ladder
+	unsigned int TopRightAreaID; // ID of the area connected to the top-right position of the ladder
+	unsigned int TopBehindAreaID; // ID of area connected to the top-behind position of the ladder
+	unsigned int BottomAreaID; // ID of the area connected to the bottom of the ladder
+
+	bool ReadData(std::streambuf& in);
+	bool WriteData(std::streambuf& out);
 };
 
 #endif

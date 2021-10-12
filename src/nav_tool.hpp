@@ -17,8 +17,8 @@ enum class ActionType {
 
 	/* These commands are redundant, as they can be emulated by the above commands.
 		CONNECT, // Connects two areas/ladder. (Can be emulated with `nav <path to connection> create` and `nav <path to connection> edit id 5`)
-		DISCONNECT, // Disconnects two areas/ladder.
-		COMPRESS // Sets area IDs to iota. */
+		DISCONNECT, // Disconnects two areas/ladder. (Simply remove a connection.)
+		COMPRESS // Sets area IDs to iota. (Use a shell for-loop with `nav <area> edit`) */
 	
 	COUNT, 
 	INVALID
@@ -45,7 +45,9 @@ struct ToolCmd {
 	std::optional<NavFile> file;
 	// IDs for type of data.
 	std::optional<IntIndex> areaLocParam;
-	std::optional<IntID> encounterPathIndex, connectionIndex;
+	std::optional<IntID> encounterPathIndex;
+	// Index to connection,
+	std::optional<std::pair<Direction, IntID> > connectionIndex;
 	std::optional<ByteID> encounterSpotID, hideSpotID, approachSpotIndex;
 	std::optional<Direction> direc;
 	// Parameters for the action.
