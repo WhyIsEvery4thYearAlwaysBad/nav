@@ -315,10 +315,8 @@ bool NavFile::ReadData(std::streambuf& buf) {
 	// Store area data.
 	unsigned int index = 0u;
 	if (!std::all_of(areas.value().begin(), areas.value().end(), [&buf, &majV = MajorVersion, &minV = MinorVersion, &index](NavArea& area) mutable {
-		std::cout << "Prefile Pos: "<<buf.pubseekoff(0, std::ios_base::cur)<<"\n";
 		if (area.ReadData(buf, majV, minV)) {
 			index++;
-			std::cout << "File Pos: "<<buf.pubseekoff(0, std::ios_base::cur)<<"\n";
 			return true;
 		}
 		else {

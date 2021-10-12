@@ -44,7 +44,11 @@ class NavArea {
 	// Approach spot count (removed in MVer 15)
 	unsigned char approachSpotCount = 0u; 
 	std::optional<std::vector<NavApproachSpot> > approachSpotData; // Approach spot container (removed in MVer 15)
-	std::pair<IntID, std::list<IntID> > ladderData[2]; // Container for ladder data.
+	/*
+		@brief Container for ladder data.
+		Stores 2 (Directions) of pairs that store the ladder count and ladder data respectively.
+	*/
+	std::array<std::pair<unsigned int, std::list<IntID> >, 2> ladderData;
 	unsigned int encounterPathCount = 0u; // Amount of encounter paths.
 	std::optional<std::deque<NavEncounterPath> > encounterPaths;
 	std::array<float, 2> EarliestOccupationTimes = {0.0f, 0.0f}; // The earliest time teams can occupy this area

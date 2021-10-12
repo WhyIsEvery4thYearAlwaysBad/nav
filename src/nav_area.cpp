@@ -447,7 +447,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 		// Ladder count
 		if (out.sputn(reinterpret_cast<char*>(&ladderData[i].first), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
 			#ifndef NDEBUG
-			std::cerr << "NavArea::WriteData(): Failed to write (direction "<<i<<") ladder count!\n";
+			std::clog << "NavArea::WriteData(): Failed to write (direction "<<i<<") ladder count!\n";
 			#endif
 			return false;
 		}
@@ -456,7 +456,7 @@ bool NavArea::WriteData(std::streambuf& out, const unsigned int& MajorVersion, c
 		{
 			if (out.sputn(reinterpret_cast<char*>(&ladderID), VALVE_INT_SIZE) != VALVE_INT_SIZE) {
 				#ifndef NDEBUG
-				std::cerr << "NavArea::WriteData(): Failed to write (direction "<<i<<") ladder data!\n";
+				std::clog << "NavArea::WriteData(): Failed to write (direction "<<i<<") ladder data!\n";
 				#endif
 				return false;
 			}
